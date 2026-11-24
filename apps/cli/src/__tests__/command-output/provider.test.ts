@@ -14,6 +14,42 @@ describe("omnyo provider command output", () => {
   const register: CommandRegistrar = (program) =>
     registerProviderCommands(program, () => "http://server");
 
+  it("uses the shared owner profile endpoint for a project default", async () => {
+    const post = vi.fn(async () => ({
+      action: "defaultsSet",
+      defaultSelection: { kind: "unprofiled" },
+    }));
+
+    stubServerApi({
+      "v1.system.providers.claude-profiles.$post": post,
+      "v1.hosts.$get": vi.fn(async () => [
+        { id: "host-1", name: "Mac", status: "connected" },
+      ]),
+    });
+    await runCommand(
+      [
+        "provider",
+        "claude-profile",
+        "default",
+        "unprofiled",
+        "--machine",
+        "host-1",
+        "--project",
+        "proj-1",
+        "--json",
+      ],
+      register,
+    );
+    expect(post).toHaveBeenCalledWith({
+      json: {
+        action: "defaultsSet",
+        hostId: "host-1",
+        projectId: "proj-1",
+        selection: { kind: "unprofiled" },
+      },
+    });
+  });
+
   it("omnyo provider list renders the shared borderless table", async () => {
     const get = vi.fn(async () => [{ id: "openai", displayName: "OpenAI" }]);
     stubServerApi({ "v1.system.providers.$get": get });

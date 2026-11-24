@@ -106,6 +106,7 @@ type EventProjectionTurnRequestStatus =
 
 export interface EventProjectionTurnRequest {
   clientRequestId: ClientTurnRequestId | null;
+  submissionId?: string;
   isGrouped: boolean;
   kind: EventProjectionTurnRequestKind;
   status: EventProjectionTurnRequestStatus;

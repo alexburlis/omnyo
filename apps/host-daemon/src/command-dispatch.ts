@@ -1,6 +1,13 @@
+import {
+  manageClaudeProfiles,
+  withClaudeProfileEnvironment,
+} from "./claude-profiles.js";
 import { prepareWorkspaceIdentityV1 } from "./command-handlers/prepare-workspace-identity-v1.js";
 import { installGlobalSkills } from "./command-handlers/install-global-skills.js";
-import { withVcsProcessPriority } from "@omnyo/process-utils";
+import {
+  resolveExecutable,
+  withVcsProcessPriority,
+} from "@omnyo/process-utils";
 import { operationEnvironment } from "./operation-environment.js";
 import {
   runEnvironmentHook,
@@ -794,18 +801,47 @@ const commandHandlers: CommandHandlerMap = {
       discardThreadRewind(command, options),
     ),
   "thread.rewind.prepare": (command, options) =>
-    withRetainedThreadEnvironment(command, options, () =>
-      prepareThreadRewind(command, options),
+    withRetainedThreadEnvironment(command, options, async () =>
+      prepareThreadRewind(
+        {
+          ...command,
+          contributedEnv: await withClaudeProfileEnvironment({
+            context: command,
+            options,
+          }),
+        },
+        options,
+      ),
     ),
   "thread.start": (command, options) =>
-    withRetainedThreadEnvironment(command, options, () =>
-      startThread(command, options),
+    withRetainedThreadEnvironment(command, options, async () =>
+      startThread(
+        {
+          ...command,
+          contributedEnv: await withClaudeProfileEnvironment({
+            context: command,
+            options,
+          }),
+        },
+        options,
+      ),
     ),
   "turn.submit": (command, options) =>
     withRetainedThreadEnvironment(command, options, async () => {
-      const entry = await ensureThreadRuntime(command, options);
+      const resolved = {
+        ...command,
+        resumeContext: {
+          ...command.resumeContext,
+          contributedEnv: await withClaudeProfileEnvironment({
+            context: command.resumeContext,
+            options,
+          }),
+        },
+      };
 
-      return submitTurn(command, entry, options);
+      const entry = await ensureThreadRuntime(resolved, options);
+
+      return submitTurn(resolved, entry, options);
     }),
   "thread.stop": stopThreadRuntime,
   "thread.storage.delete": async (command, options) => {
@@ -834,7 +870,19 @@ const commandHandlers: CommandHandlerMap = {
     return { ok: true };
   },
   "thread.goal.clear": async (command, options) => {
-    const entry = await ensureThreadRuntime(command, options);
+    const entry = await ensureThreadRuntime(
+      {
+        ...command,
+        resumeContext: {
+          ...command.resumeContext,
+          contributedEnv: await withClaudeProfileEnvironment({
+            context: command.resumeContext,
+            options,
+          }),
+        },
+      },
+      options,
+    );
 
     const result = await entry.runtime.clearThreadGoal({
       threadId: command.threadId,
@@ -1112,6 +1160,13 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
   "host.remove_path": mutateIsolatedHostCommand,
   "host.browse_directory": readIsolatedHostCommand,
   "host.paths_exist": readIsolatedHostCommand,
+  "host.rtk_status": async (_command, options) => ({
+    installed:
+      resolveExecutable("rtk", {
+        cwd: process.cwd(),
+        env: options.runtimeManager.getShellEnv(),
+      }) !== undefined,
+  }),
   "host.agent_processes.terminate": async (_command, options) => {
     const containment = options.agentProcessContainment;
 
@@ -1175,9 +1230,22 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
   "host.read_file_chunk": readIsolatedHostCommand,
   "host.read_file_relative": readIsolatedHostCommand,
   "host.write_file": mutateIsolatedHostCommand,
+  "claude-profile/manage": (command, options) =>
+    manageClaudeProfiles(command.request, options),
   "provider.list_models": (command, options) =>
-    withResolvedBridgeLaunch(command, options, (args) =>
-      options.listModels({ ...args, contributedEnv: command.contributedEnv }),
+    withResolvedBridgeLaunch(command, options, async (args) =>
+      options.listModels({
+        ...args,
+        contributedEnv: await withClaudeProfileEnvironment({
+          options,
+          context: {
+            ...command,
+            ...(command.cwd === undefined
+              ? {}
+              : { workspaceContext: { workspacePath: command.cwd } }),
+          },
+        }),
+      }),
     ),
   "provider.health": (command, options) =>
     withResolvedBridgeLaunch(command, options, (args) =>

@@ -424,6 +424,10 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
     reason:
       "Thread creation may omit root-thread presentation and execution fields so the server can resolve project/provider defaults.",
     fields: [
+      "createThreadRequestSchema.claudeProfile",
+      "createThreadRequestSchema.idle",
+      "createThreadRequestSchema.pluginHome",
+      "createThreadRequestSchema.quiet",
       "createThreadRequestSchema.sectionId",
       "createThreadRequestSchema.pinned",
       "createThreadRequestSchema.model",
@@ -440,7 +444,7 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "Follow-up and queued messages may omit requestId so the server supplies a request identity, and execution fields so the thread's current/default execution settings are reused.",
+      "Follow-up and queued messages may omit requestId so the server supplies a request identity, and execution fields so the thread's current/default execution settings are reused. Only durable sends carry a submission ID from prompt input to timeline row.",
     fields: [
       "createQueuedMessageRequestSchema.model",
       "createQueuedMessageRequestSchema.reasoningLevel",
@@ -450,6 +454,15 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "sendMessageRequestSchema.permissionMode",
       "sendMessageRequestSchema.reasoningLevel",
       "sendMessageRequestSchema.serviceTier",
+      "createQueuedMessageRequestSchema.input.submissionId",
+      "createThreadRequestSchema.input.submissionId",
+      "forkThreadRequestSchema.agentContextSeed.submissionId",
+      "forkThreadRequestSchema.input.submissionId",
+      "sendMessageRequestSchema.input.submissionId",
+      "sendQueuedMessageResponseSchema.queuedMessage.content.submissionId",
+      "threadTimelineResponseSchema.delta.upsertRows.turnRequest.submissionId",
+      "threadTimelineResponseSchema.rows.turnRequest.submissionId",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.turnRequest.submissionId",
       "sendMessageRequestSchema.requestId",
       "sendQueuedMessageRequestSchema.requestId",
     ],
@@ -509,6 +522,9 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
     reason:
       "Thread PATCH requests omit fields that should be left unchanged; null explicitly clears nullable values.",
     fields: [
+      "updateThreadRequestSchema.experimental_pluginHome",
+      "updateThreadRequestSchema.groupId",
+      "updateThreadRequestSchema.serviceTier",
       "updateThreadRequestSchema.model",
       "updateThreadRequestSchema.sectionId",
       "updateThreadRequestSchema.parentThreadId",
@@ -544,8 +560,9 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "System provider lookups may target a host indirectly or directly, omit provider id to use the host default, and omit capability to return the full roster.",
+      "System provider lookups can select a host or Claude profile. They may omit the provider ID to use the host default and omit capability to return the full roster.",
     fields: [
+      "systemExecutionOptionsQuerySchema.claudeProfileId",
       "systemExecutionOptionsQuerySchema.environmentId",
       "systemExecutionOptionsQuerySchema.hostId",
       "systemExecutionOptionsQuerySchema.providerId",
@@ -575,6 +592,8 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "threadListQuerySchema.sectionId",
       "threadListQuerySchema.limit",
       "threadListQuerySchema.hasParent",
+      "threadListQuerySchema.groupId",
+      "threadListQuerySchema.includePluginHome",
       "threadListQuerySchema.includeHidden",
       "threadListQuerySchema.offset",
       "threadListQuerySchema.originKind",
@@ -1307,12 +1326,15 @@ describe("server-contract canonical schemas", () => {
           title: "Pending thread",
           titleFallback: "Pending thread",
           sectionId: null,
+          groupId: null,
           status: "idle",
           parentThreadId: null,
           sourceThreadId: null,
           lifecycleOwnerThreadId: null,
           originKind: null,
           originPluginId: null,
+          pluginHome: false,
+          quiet: false,
           visibility: "visible",
           archivedAt: null,
           pinnedAt: null,

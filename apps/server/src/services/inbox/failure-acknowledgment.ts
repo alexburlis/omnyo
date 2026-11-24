@@ -1,4 +1,5 @@
 import {
+  applyThreadLifecycleEventInTransaction,
   getActiveStoredTurnId,
   getLastStoredTurnRequestEvent,
   getStoredTurnRequestEventForTurn,
@@ -12,6 +13,7 @@ import type {
   InboxFailureAcknowledgeRequest,
   InboxFailureAcknowledgeResponse,
   InboxFailureView,
+  Thread,
 } from "@omnyo/domain";
 import { and, eq } from "drizzle-orm";
 import { ApiError } from "../../errors.js";
@@ -84,12 +86,12 @@ export function requireFailureActor(
   );
 }
 
-function requireInactiveTarget(db: DbQueryConnection, threadId: string): void {
+function requireInactiveTarget(db: DbQueryConnection, threadId: string) {
   const thread = getInboxThread(db, threadId);
 
   if (
     thread === null ||
-    thread.status !== "idle" ||
+    (thread.status !== "idle" && thread.status !== "error") ||
     thread.archivedAt !== null ||
     thread.deletedAt !== null ||
     hasLiveThreadStartInFlight(threadId) ||
@@ -98,7 +100,7 @@ function requireInactiveTarget(db: DbQueryConnection, threadId: string): void {
     getActiveStoredTurnId(db, threadId) !== null ||
     getOpenTurnMark(db, threadId) !== null
   )
-    refuse("The chat must be idle with no turn or recovery in flight.");
+    refuse("The chat must be inactive with no turn or recovery in flight.");
 
   if (
     db
@@ -133,21 +135,23 @@ function requireInactiveTarget(db: DbQueryConnection, threadId: string): void {
     refuse(
       "The chat still has queued work, input, a wait or an active producer.",
     );
+
+  return thread;
 }
 
 export function acknowledgeFailure(
-  deps: Pick<AppDeps, "db">,
+  deps: Pick<AppDeps, "db" | "hub">,
   args: InboxFailureAcknowledgeRequest & {
     threadId: string;
     failureId: string;
     actor: InboxActor;
     now: number;
   },
-): InboxFailureAcknowledgeResponse {
+): { response: InboxFailureAcknowledgeResponse; settledThread: Thread | null } {
   return deps.db.transaction(
     (tx) => {
       requireFailureActor(tx, args.threadId, args.actor);
-      requireInactiveTarget(tx, args.threadId);
+      const target = requireInactiveTarget(tx, args.threadId);
       const failure = getFailure(tx, args.failureId);
 
       if (failure === null || failure.threadId !== args.threadId)
@@ -181,7 +185,10 @@ export function acknowledgeFailure(
         if (failure.resolvedBy !== "acknowledged")
           refuse("This failure was resolved by another action.");
 
-        return { failure: toFailureView(failure), acknowledged: false };
+        return {
+          response: { failure: toFailureView(failure), acknowledged: false },
+          settledThread: null,
+        };
       }
 
       if (
@@ -229,7 +236,28 @@ export function acknowledgeFailure(
 
       if (resolved === null) refuse("The failure no longer exists.");
 
-      return { failure: toFailureView(resolved), acknowledged: true };
+      let settledThread: Thread | null = null;
+
+      if (target.status === "error") {
+        const transition = applyThreadLifecycleEventInTransaction(
+          tx,
+          deps.hub,
+          {
+            threadId: target.id,
+            event: { type: "failure.acknowledged" },
+          },
+        );
+
+        if (!transition.applied)
+          refuse("The chat changed while acknowledging its failure.");
+
+        settledThread = transition.thread;
+      }
+
+      return {
+        response: { failure: toFailureView(resolved), acknowledged: true },
+        settledThread,
+      };
     },
     { behavior: "immediate" },
   );

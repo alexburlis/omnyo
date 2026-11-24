@@ -27,6 +27,7 @@ export async function readExecutionOptions(
           environmentId: input.environmentId,
           hostId: input.hostId,
           providerId: input.providerId,
+          claudeProfileId: input.claudeProfileId,
         },
       },
       ...signalRequestArgs(input.signal),

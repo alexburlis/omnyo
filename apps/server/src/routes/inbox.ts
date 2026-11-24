@@ -45,6 +45,7 @@ import {
   listEventSourceViews,
 } from "../services/inbox/event-source-runner.js";
 import { requireEventReporter } from "../services/inbox/event-sources.js";
+import { buildThreadStatusChangeMetadata } from "../services/threads/thread-runtime-display.js";
 
 import {
   acknowledgeFailure,
@@ -173,7 +174,7 @@ export function registerInboxRoutes(app: Hono, deps: AppDeps): void {
   post(routes.acknowledgeFailure, (context, input) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
 
-    const result = acknowledgeFailure(deps, {
+    const { response, settledThread } = acknowledgeFailure(deps, {
       ...input,
       threadId: thread.id,
       failureId: context.req.param("failureId"),
@@ -181,9 +182,16 @@ export function registerInboxRoutes(app: Hono, deps: AppDeps): void {
       now: Date.now(),
     });
 
-    if (result.acknowledged) notifyRoot(deps, thread.id);
+    if (settledThread !== null)
+      deps.hub.notifyThread(
+        settledThread.id,
+        ["status-changed"],
+        buildThreadStatusChangeMetadata(deps, settledThread),
+      );
 
-    return context.json(result);
+    if (response.acknowledged) notifyRoot(deps, thread.id);
+
+    return context.json(response);
   });
 
   get(routes.waits, (context) => {

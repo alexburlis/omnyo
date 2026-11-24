@@ -5,6 +5,7 @@ export type ThreadLifecycleEvent =
   | { type: "run.started" }
   | { type: "run.succeeded" }
   | { type: "run.failed" }
+  | { type: "failure.acknowledged" }
   | { type: "stop.requested" }
   | { type: "stop.settled" };
 
@@ -23,6 +24,7 @@ export const THREAD_LIFECYCLE_EVENT_PREDICATES: Record<
   "run.started": { notArchived: true, notDeleted: true },
   "run.succeeded": {},
   "run.failed": { notDeleted: true },
+  "failure.acknowledged": { notArchived: true, notDeleted: true },
   "stop.requested": {},
   "stop.settled": {},
 };
@@ -58,6 +60,7 @@ export const THREAD_LIFECYCLE: Record<
   error: {
     "run.preparing": "starting",
     "run.started": "active",
+    "failure.acknowledged": "idle",
   },
 };
 

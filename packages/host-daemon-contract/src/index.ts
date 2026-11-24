@@ -1,3 +1,5 @@
+export * from "./claude-profiles.js";
+
 export * from "./commands.js";
 
 export * from "./previews.js";

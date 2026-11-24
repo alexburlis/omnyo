@@ -1023,10 +1023,10 @@ it.each([true, false])(
   },
 );
 
-it("updates the running turn speed without input, interruption, or session replacement", async () => {
+it.each(["root", "child"])("changes speed with %s turns", async (mode) => {
   writeFileSync(
     scriptPath,
-    JSON.stringify({ requestLogPath, interruptQueueMode: "root" }),
+    JSON.stringify({ requestLogPath, interruptQueueMode: mode }),
   );
   harness.sendRequest(1, "thread/start", {
     threadId: THREAD_ID,

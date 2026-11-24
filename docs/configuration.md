@@ -1,5 +1,16 @@
 # Configuration
 
+The native Claude profile pilot is disabled by default. On the
+coordinator's local Mac, `omnyo provider claude-profile pilot enable`
+enables its Account Pooler and composer controls. `pilot disable` hides them
+and preserves saved profiles, defaults and chat bindings. Machine and project
+defaults are set with `omnyo provider claude-profile default PROFILE_ID` and
+`--project PROJECT_ID`; `unprofiled` selects the existing authentication path.
+These defaults apply only to new chats. Sign-in remains in Claude Code's native
+storage. The pilot currently requires Claude Code 2.1.331. Unsupported hosts or
+CLI versions report unavailable. A provider limit stops the chat on its pinned
+account; it never selects another account or resends the prompt automatically.
+
 The Omnyo migration owner can install a versioned `stateMigration` binding in
 `config.json`. It contains an absolute journal path, the exact source and
 destination profile paths, and source, destination and artifact digests. The
@@ -2773,6 +2784,9 @@ The server discards voice diagnostics received while reporting is off.
 Sentry keeps unexpected terminal failures and genuine process failures. Explicit
 validated recovered, cancelled and deferred outcomes are discarded before
 ordinary capture, while fatal and unclassified failures remain reportable.
+The coordinator also excludes the specific Claude Code HTTP 409 response for a
+retired Account Pooler conversation. The conversation still shows the refusal
+and recovery instructions. Other HTTP 409 failures remain reportable.
 Safe fixed summaries identify the failed operation. Web failure context records
 request/body phase, import classification, preflight result and observed online
 state without sending request URLs or browser content. Timeline projection

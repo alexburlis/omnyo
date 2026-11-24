@@ -299,6 +299,51 @@ describe("useSystemProviders", () => {
 });
 
 describe("useSystemExecutionOptions", () => {
+  it("keeps profile model requests separate from unprofiled cached models", async () => {
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+    const provider = makeProviderInfo({ id: "claude-code" });
+    queryClient.setQueryData(
+      systemExecutionOptionsQueryKey({
+        environmentId: null,
+        hostId: "host-native",
+        providerId: "claude-code",
+      }),
+      { ...EXECUTION_OPTIONS_RESPONSE, providers: [provider] },
+    );
+    vi.mocked(sdk.system.executionOptions).mockImplementation(
+      () => new Promise(() => undefined),
+    );
+
+    const { result } = renderHook(
+      () => [
+        useSystemExecutionOptions({
+          hostId: "host-native",
+          providerId: "claude-code",
+          claudeProfileId: "profile-one",
+        }),
+        useSystemExecutionOptions({
+          hostId: "host-native",
+          providerId: "claude-code",
+          claudeProfileId: "profile-two",
+        }),
+      ],
+      { wrapper },
+    );
+
+    expect(result.current.every((query) => query.data === undefined)).toBe(
+      true,
+    );
+    await waitFor(() =>
+      expect(sdk.system.executionOptions).toHaveBeenCalledTimes(2),
+    );
+    expect(sdk.system.executionOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ claudeProfileId: "profile-one" }),
+    );
+    expect(sdk.system.executionOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ claudeProfileId: "profile-two" }),
+    );
+  });
+
   it("reopens a validated catalog immediately while its refresh is still pending", async () => {
     vi.mocked(sdk.system.executionOptions).mockResolvedValue(
       EXECUTION_OPTIONS_RESPONSE,

@@ -281,6 +281,7 @@ function makeThread(): ThreadDetailSecondaryContentProps["metadata"]["thread"] {
     shelvedAt: null,
     projectId: "proj-test",
     providerId: "codex",
+    claudeProfileBinding: null,
     lifecycleOwnerThreadId: null,
     sourceThreadId: null,
     originKind: null,

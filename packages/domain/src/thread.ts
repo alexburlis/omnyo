@@ -19,6 +19,7 @@ import {
 import { threadStatusSchema, threadStatusValues } from "./thread-status.js";
 import { threadOriginKindSchema } from "./thread-origin-kind.js";
 import { threadVisibilitySchema } from "./thread-visibility.js";
+import { claudeProfileBindingSchema } from "./claude-profile.js";
 
 export { threadStatusSchema, threadStatusValues } from "./thread-status.js";
 
@@ -398,6 +399,7 @@ export const threadSchema = z.object({
   projectId: z.string(),
   environmentId: z.string().nullable(),
   providerId: z.string(),
+  claudeProfileBinding: claudeProfileBindingSchema.nullable().default(null),
   title: z.string().nullable(),
   titleFallback: z.string().nullable(),
   sectionId: z.string().nullable(),

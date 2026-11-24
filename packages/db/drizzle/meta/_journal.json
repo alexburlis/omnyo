@@ -1240,6 +1240,13 @@
       "when": 1795528552229,
       "tag": "0176_thread_quiet",
       "breakpoints": true
+    },
+    {
+      "idx": 177,
+      "version": "6",
+      "when": 1795552021768,
+      "tag": "0177_native_claude_profile_binding",
+      "breakpoints": true
     }
   ]
 }

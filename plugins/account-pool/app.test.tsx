@@ -142,6 +142,7 @@ function render(
         ...extraRpc,
       },
       openUrl: () => true,
+      sdk: { hosts: { list: async () => [] } },
       experimental_copyToClipboard: copyToClipboard,
     },
   );

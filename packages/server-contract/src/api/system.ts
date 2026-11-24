@@ -12,17 +12,109 @@ import {
   appKeybindingsSchema,
   appThemeSchema,
   availableModelSchema,
+  claudeProfileSelectionSchema,
   experimentsSchema,
   featureFlagsSchema,
   jsonValueSchema,
   permissionModeSchema,
   pluginThemeMetaSchema,
   providerInfoSchema,
+  usageOnboardingStepSchema,
 } from "@omnyo/domain";
 import { providerHealthSchema as providerHealthSchema } from "@omnyo/provider-bridge-protocol/provider-maintenance";
 import { hostPlatformSchema } from "@omnyo/host-daemon-contract/local";
+import {
+  claudeProfileIdSchema,
+  claudeProfileSchema,
+  claudeProfileManagementResultSchema,
+} from "@omnyo/host-daemon-contract";
 import { machineEnvironmentSetSchema } from "./machine-environment.js";
 import { providerCommandSchema } from "./projects.js";
+
+const claudeProfileTarget = {
+  hostId: z.string().min(1),
+  profileId: claudeProfileIdSchema,
+};
+
+export const systemClaudeProfilesRequestSchema = z.discriminatedUnion(
+  "action",
+  [
+    z
+      .object({
+        action: z.literal("list"),
+        hostId: z.string().min(1),
+        projectId: z.string().min(1).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        action: z.literal("add"),
+        hostId: z.string().min(1),
+        label: claudeProfileSchema.shape.label,
+        adoptExisting: z.literal(true).optional(),
+      })
+      .strict(),
+    z.object({ action: z.literal("status"), ...claudeProfileTarget }).strict(),
+    z
+      .object({ action: z.literal("loginStart"), ...claudeProfileTarget })
+      .strict(),
+    z
+      .object({ action: z.literal("loginGet"), ...claudeProfileTarget })
+      .strict(),
+    z
+      .object({ action: z.literal("loginCancel"), ...claudeProfileTarget })
+      .strict(),
+    z
+      .object({
+        action: z.literal("defaultsSet"),
+        hostId: z.string().min(1),
+        projectId: z.string().min(1).optional(),
+        selection: claudeProfileSelectionSchema,
+      })
+      .strict(),
+    z.object({ action: z.literal("pilotSet"), enabled: z.boolean() }).strict(),
+  ],
+);
+
+export type SystemClaudeProfilesRequest = z.infer<
+  typeof systemClaudeProfilesRequestSchema
+>;
+
+export const systemClaudeProfilesResultSchema = z
+  .union([
+    claudeProfileManagementResultSchema,
+    z
+      .object({
+        action: z.literal("list"),
+        supported: z.boolean(),
+        profiles: z.array(claudeProfileSchema),
+        defaultSelection: claudeProfileSelectionSchema,
+      })
+      .strict(),
+    z
+      .object({
+        action: z.literal("defaultsSet"),
+        defaultSelection: claudeProfileSelectionSchema,
+      })
+      .strict(),
+    z.object({ action: z.literal("pilotSet"), enabled: z.boolean() }).strict(),
+  ])
+  .transform((result, context) => {
+    if (result.action === "list" && !("defaultSelection" in result)) {
+      context.addIssue({
+        code: "custom",
+        message: "Profile lists require a default selection.",
+      });
+
+      return z.NEVER;
+    }
+
+    return result;
+  });
+
+export type SystemClaudeProfilesResult = z.infer<
+  typeof systemClaudeProfilesResultSchema
+>;
 
 const machineEnvironmentReplacementVariableSchema =
   machineEnvironmentSetSchema.extend({
@@ -119,6 +211,7 @@ export const systemExecutionOptionsQuerySchema = z
   .object({
     ...systemProviderHostQueryFields,
     providerId: z.string().min(1),
+    claudeProfileId: claudeProfileIdSchema,
   })
   .partial()
   .superRefine(rejectMultipleWorkspaceSelectors);
@@ -224,21 +317,11 @@ export const testAiServiceResponseSchema = z.discriminatedUnion("ok", [
 
 export type TestAiServiceResponse = z.infer<typeof testAiServiceResponseSchema>;
 
-const onboardingStepTelemetrySchema = z.enum([
-  "agent",
-  "projects",
-  "chats",
-  "browser",
-  "plugins",
-  "automations",
-  "devices",
-]);
-
 const onboardingEntryTelemetrySchema = z.enum(["first_run", "replay"]);
 
 const onboardingStepTelemetryPropertiesSchema = z
   .object({
-    step: onboardingStepTelemetrySchema,
+    step: usageOnboardingStepSchema,
     entry: onboardingEntryTelemetrySchema,
   })
   .strict();
@@ -317,7 +400,7 @@ export const recordTelemetryEventRequestSchema = z.discriminatedUnion("name", [
         .object({
           outcome: z.enum(["completed", "skipped"]),
           entry: onboardingEntryTelemetrySchema,
-          last_step: onboardingStepTelemetrySchema,
+          last_step: usageOnboardingStepSchema,
         })
         .strict(),
     })

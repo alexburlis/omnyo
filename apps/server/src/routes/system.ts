@@ -89,6 +89,7 @@ import {
   setProviderEnabled,
 } from "../services/system/provider-management.js";
 import { getProviderStates } from "../services/system/provider-states.js";
+import { manageClaudeProfiles } from "../services/providers/claude-profiles.js";
 import { getProviderUsageLimits } from "../services/system/usage-limits.js";
 import {
   listCustomThemeNames,
@@ -291,6 +292,20 @@ export function registerSystemRoutes(
       showUnhandledProviderEvents: settings.showDiagnosticEvents,
     };
   }
+
+  post(routes.claudeProfiles, async (context, payload) => {
+    if (
+      getGateAuthKind(context) === "machine" ||
+      getGateAuthKind(context) === "anonymous"
+    )
+      throw new ApiError(
+        403,
+        "forbidden",
+        "Native Claude profiles are available only to the owner.",
+      );
+
+    return context.json(await manageClaudeProfiles(deps, payload));
+  });
 
   post(routes.setMachineEnvironmentVariable, async (context, payload) => {
     if (getGateAuthKind(context) === "machine")

@@ -317,6 +317,7 @@ function makeThread(
     projectId: "project-1",
     environmentId: null,
     providerId: "codex",
+    claudeProfileBinding: null,
     title: `Title ${id}`,
     titleFallback: `Title ${id}`,
     sectionId: null,

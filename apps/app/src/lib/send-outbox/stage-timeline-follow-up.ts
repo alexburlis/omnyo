@@ -1,0 +1,88 @@
+import type { QueryClient } from "@tanstack/react-query";
+import {
+  buildCreateQueuedFollowUpRequest,
+  type FollowUpExecutionSelection,
+  type PromptDraftAttachment,
+} from "@omnyo/client-core";
+import type { prepareComposerAttachmentSubmission } from "../composer-attachment-submission";
+import { buildOptimisticUserMessageRow } from "@/hooks/cache-owners/optimistic-user-message";
+import {
+  addPendingSentMessage,
+  removePendingSentMessage,
+} from "@/hooks/cache-owners/pending-sent-messages";
+import { createSubmissionId } from "./send-outbox-entry";
+import {
+  buildOutboxMessageInput,
+  isSendOutboxAvailable,
+  stageThreadMessageInOutbox,
+} from "./send-outbox";
+
+export async function stageTimelineFollowUp({
+  queryClient,
+  threadId,
+  projectId,
+  submission,
+  execution,
+  sourceOf,
+}: {
+  queryClient: QueryClient;
+  threadId: string;
+  projectId: string;
+  submission: Pick<
+    ReturnType<typeof prepareComposerAttachmentSubmission>,
+    "input" | "getDraft" | "prepareInput"
+  >;
+  execution: FollowUpExecutionSelection;
+  sourceOf: (attachment: PromptDraftAttachment) => File | null;
+}): Promise<boolean> {
+  const submissionId = createSubmissionId();
+
+  const row = buildOptimisticUserMessageRow({
+    submissionId,
+    createdAt: Date.now(),
+    clientRequestId: null,
+    input: submission.input,
+    mode: "queue-if-active",
+    threadId,
+    threadStatus: null,
+  });
+
+  addPendingSentMessage(queryClient, threadId, row);
+
+  try {
+    if (!(await isSendOutboxAvailable())) return false;
+
+    const request = buildCreateQueuedFollowUpRequest({
+      threadId,
+      input: submission.prepareInput
+        ? await submission.prepareInput()
+        : submission.input,
+      execution,
+    });
+
+    if (!request) return false;
+    const { id: _threadId, ...message } = request;
+
+    const staged = await buildOutboxMessageInput({
+      attachments: submission.getDraft().attachments,
+      input: message.input,
+      sourceOf,
+    });
+
+    return (
+      (await stageThreadMessageInOutbox({
+        threadId,
+        projectId,
+        submissionId,
+        attachments: staged.attachments,
+        message: {
+          ...message,
+          input: staged.input.map((part) => ({ ...part, submissionId })),
+          messageSource: { kind: "user" },
+        },
+      })) === "staged"
+    );
+  } finally {
+    removePendingSentMessage(queryClient, threadId, row.id);
+  }
+}

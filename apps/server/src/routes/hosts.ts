@@ -514,6 +514,19 @@ export function registerHostRoutes(
     return context.json(result);
   });
 
+  get(routes.rtkStatus, async (context) => {
+    const hostId = context.req.param("id");
+    assertUsableHostId(deps, { hostId });
+
+    const result = await callHostRetryableOnlineRpc(deps, {
+      hostId,
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      command: { type: "host.rtk_status" },
+    });
+
+    return context.json(result);
+  });
+
   post(routes.pickFolder, async (context, payload) => {
     const hostId = context.req.param("id");
     assertUsableHostId(deps, { hostId });

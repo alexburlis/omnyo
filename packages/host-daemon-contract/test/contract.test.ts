@@ -198,6 +198,7 @@ const DIRECT_PROBE_OWNER = {
 };
 
 const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
+  "claude-profile/manage": { action: "list", supported: true, profiles: [] },
   "host.housekeeping.status": {
     status: "complete",
     checkedAt: 1700000000000,
@@ -390,6 +391,7 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
       "/home/me/missing": false,
     },
   },
+  "host.rtk_status": { installed: false },
   "project.inspect": {
     path: "/home/me/project",
     gitRemoteUrl: "git@example.com:me/project.git",
@@ -1037,6 +1039,14 @@ function terminalDataBase64(byteLength: number): string {
 }
 
 const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
+  "hostDaemonCommandSchema.claudeProfileBinding":
+    "a selected native Claude profile pins this runtime to its host-owned account; absence keeps the ordinary provider authentication path.",
+  "hostDaemonCommandSchema.resumeContext.claudeProfileBinding":
+    "a profiled thread resumes through its saved native account; absence keeps the ordinary provider authentication path.",
+  "hostDaemonOnlineRpcCommandSchema.claudeProfileBinding":
+    "a model catalog request selects a native Claude account only when the caller has a profile binding; absence uses ordinary provider authentication.",
+  "hostDaemonOnlineRpcCommandSchema.request.adoptExisting":
+    "profile creation sets true only to adopt the current native sign-in; absence creates a separate native configuration.",
   "hostDaemonInteractiveRequestSchema.eventsThrough":
     "an older admitted daemon may omit the event receipt watermark; presence orders approval registration after those events, while absence preserves that daemon's unstamped request semantics.",
   "hostDaemonCommandSchema.resolution.description":
@@ -1063,6 +1073,8 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a dynamic tool's presentation has a title only when the call has a headline (a path, a query); absence means the label stands alone.",
   "hostDaemonCommandSchema.input.sourceProjectId":
     "a source project exists only on a portable server-facing attachment reference; the server copies it into the destination and strips this field before sending a daemon command.",
+  "hostDaemonCommandSchema.input.submissionId":
+    "the submission ID is present only when the caller associates the input with a known submission.",
   "hostDaemonCommandSchema.input.hostId":
     "a machine exists only on a server-facing absolute-path reference; the server checks it against the thread's machine and strips this field before sending a daemon command.",
   "hostDaemonCommandSchema.input.mimeType":
@@ -1075,6 +1087,8 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a prompt input declares visibility only to hide itself from the person: the single value agent-only marks an input the transcript does not show, so absence is the ordinary visible input.",
   "hostDaemonCommandSchema.inputGroups.sourceProjectId":
     "a source project exists only on a portable server-facing attachment reference; the server copies it into the destination and strips this field before sending grouped input to the daemon.",
+  "hostDaemonCommandSchema.inputGroups.submissionId":
+    "the submission ID is present only when the caller associates a grouped input with a known submission.",
   "hostDaemonCommandSchema.inputGroups.hostId":
     "a machine exists only on a server-facing absolute-path reference; the server checks it against the thread's machine and strips this field before sending a daemon command.",
   "hostDaemonCommandSchema.inputGroups.mimeType":
@@ -1483,7 +1497,7 @@ const CONTRIBUTED_ENV = [
 
 describe("host-daemon command schemas", () => {
   it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(261);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(264);
     expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 
@@ -3486,7 +3500,9 @@ describe("host-daemon session schemas", () => {
       JSON.parse(JSON.stringify(shippedDaemonRequest)),
     );
 
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(261);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBeGreaterThan(
+      shippedDaemonRequest.protocolVersion,
+    );
     expect(parsed).toEqual(shippedDaemonRequest);
   });
 

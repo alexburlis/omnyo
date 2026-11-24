@@ -141,6 +141,10 @@ import {
   isProjectlessProjectId,
 } from "@/lib/route-paths";
 import { sdk } from "@/lib/sdk";
+import {
+  ClaudeAccountControl,
+  type ClaudeProfileSelection,
+} from "./ClaudeAccountControl";
 import { prepareComposerAttachmentSubmission } from "@/lib/composer-attachment-submission";
 import {
   isPendingChatId,
@@ -998,7 +1002,34 @@ export function NewThreadComposer({
     sidebarNavigationSettled &&
     environmentProviders !== undefined;
 
+  const [claudeProfileChoice, setClaudeProfileChoice] = useState<{
+    key: string;
+    selection: ClaudeProfileSelection;
+  } | null>(null);
+
+  const resolveClaudeProfileHostId = useCallback(
+    (routing: { hostId?: string; environmentId?: string }) => {
+      if (routing.hostId) return routing.hostId;
+
+      if (routing.environmentId)
+        return (
+          projectThreads?.find(
+            (thread) => thread.environmentId === routing.environmentId,
+          )?.environmentHostId ??
+          (seededReuseEnvironmentRow?.id === routing.environmentId
+            ? seededReuseEnvironmentRow.hostId
+            : null)
+        );
+
+      return defaultHostId;
+    },
+    [defaultHostId, projectThreads, seededReuseEnvironmentRow],
+  );
+
   const creationOptions = useThreadCreationOptions({
+    claudeProfileChoice,
+    claudeProjectId: projectId,
+    resolveClaudeProfileHostId,
     enabled: providerRoutingReady && !projectDefaultsUnavailable,
     scope: selectionScope,
     preferenceProjectId: projectId,
@@ -1017,6 +1048,8 @@ export function NewThreadComposer({
   });
 
   const {
+    claudeAccounts,
+    claudeProfileSelection,
     activeModel,
     catalogModelOptions,
     executionInputSources,
@@ -1651,6 +1684,30 @@ export function NewThreadComposer({
         ? selectedEnvironment.machine.hostId
         : null;
 
+  const effectiveClaudeProfile =
+    claudeProfileSelection ?? claudeAccounts.data?.defaultSelection;
+
+  const selectedClaudeAccount =
+    effectiveClaudeProfile?.kind === "profile"
+      ? claudeAccounts.data?.profiles.find(
+          (profile) => profile.id === effectiveClaudeProfile.profileId,
+        )
+      : undefined;
+
+  const claudeAccountBlocker =
+    selectedProviderId === "claude-code"
+      ? !claudeAccounts.ready
+        ? "Checking Claude account..."
+        : claudeAccounts.error
+          ? "Claude accounts are unavailable. Try again before sending."
+          : effectiveClaudeProfile?.kind === "profile" &&
+              claudeAccounts.data !== null &&
+              (!claudeAccounts.data.supported ||
+                selectedClaudeAccount?.status !== "ready")
+            ? "Sign in to the selected Claude account or choose another account."
+            : null
+      : null;
+
   const initialPromptDraft = useInitialPromptDraft(seed?.initialPrompt ?? null);
   const seedInitialPrompt = promptDraft.restoreIfEmpty;
 
@@ -1894,24 +1951,26 @@ export function NewThreadComposer({
       (selectionScope === "new-thread" ? seed?.environment : undefined) ??
       null);
 
-  const submissionReadinessReason = resolveNewThreadSubmitDisabledReason({
-    environmentProviderInputsBlocker:
-      machineProviderInputs.blockedReason ?? environmentProviderInputsBlocker,
-    environmentSetupRequiredReason:
-      environmentSetupRequiredReason ?? machineServerAccessReason,
-    isCopyingAttachments,
-    isLoadingModels: isLoadingModels && selectedThreadModel.length === 0,
-    isSubmitting: false,
-    isUploading: false,
-    modelLoadError,
-    projectDefaultsStatus: projectDefaultsState.status,
-    projectDefaultsUnavailable,
-    promptInputEmpty: false,
-    providerDisplayName: selectedProviderDisplayName,
-    selectedProviderId,
-    selectedThreadModel,
-    submissionEnvironmentUnavailable: submissionEnvironment === null,
-  });
+  const submissionReadinessReason =
+    claudeAccountBlocker ??
+    resolveNewThreadSubmitDisabledReason({
+      environmentProviderInputsBlocker:
+        machineProviderInputs.blockedReason ?? environmentProviderInputsBlocker,
+      environmentSetupRequiredReason:
+        environmentSetupRequiredReason ?? machineServerAccessReason,
+      isCopyingAttachments,
+      isLoadingModels: isLoadingModels && selectedThreadModel.length === 0,
+      isSubmitting: false,
+      isUploading: false,
+      modelLoadError,
+      projectDefaultsStatus: projectDefaultsState.status,
+      projectDefaultsUnavailable,
+      promptInputEmpty: false,
+      providerDisplayName: selectedProviderDisplayName,
+      selectedProviderId,
+      selectedThreadModel,
+      submissionEnvironmentUnavailable: submissionEnvironment === null,
+    });
 
   const submitDisabledReason =
     (isSubmitting ? "Starting thread..." : submissionReadinessReason) ??
@@ -2001,6 +2060,10 @@ export function NewThreadComposer({
         model: selectedThreadModel,
         reasoningLevel,
         permissionMode,
+        ...(selectedProviderId === "claude-code" &&
+        claudeProfileSelection !== undefined
+          ? { claudeProfile: claudeProfileSelection }
+          : {}),
         ...(supportsServiceTier && serviceTier ? { serviceTier } : {}),
         ...(Object.keys(sessionOptionSelections).length > 0
           ? { sessionOptions: sessionOptionSelections }
@@ -2086,6 +2149,7 @@ export function NewThreadComposer({
       }
     },
     [
+      claudeProfileSelection,
       clearReuseEnvironment,
       capturePendingUploads,
       pendingUploads.length,
@@ -2666,6 +2730,18 @@ export function NewThreadComposer({
           }
           projectShelf={options.projectShelf ?? null}
           execution={{
+            accountControl: (disabled) => (
+              <ClaudeAccountControl
+                data={claudeAccounts.data}
+                error={claudeAccounts.error}
+                selection={claudeProfileSelection}
+                onChange={(selection) =>
+                  setClaudeProfileChoice({ key: claudeAccounts.key, selection })
+                }
+                onSetDefault={claudeAccounts.setProjectDefault}
+                disabled={disabled || locks.provider || isSubmitting}
+              />
+            ),
             disabled: locks.execution,
             providerRouting: executionOptionsRouting,
             catalog: {
@@ -2720,6 +2796,11 @@ export function NewThreadComposer({
     [
       activeModel,
       applyExecutionTuple,
+      claudeAccounts.data,
+      claudeAccounts.error,
+      claudeAccounts.key,
+      claudeAccounts.setProjectDefault,
+      claudeProfileSelection,
       attachmentError,
       attachmentTargetHostId,
       catalogModelOptions,

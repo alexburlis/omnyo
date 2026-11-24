@@ -328,6 +328,9 @@ export async function buildThreadStartCommand(
     instructions: runtimeContext.instructions,
     dynamicTools: runtimeContext.dynamicTools,
     contributedEnv: runtimeContext.contributedEnv,
+    ...(runtimeContext.claudeProfileBinding === null
+      ? {}
+      : { claudeProfileBinding: runtimeContext.claudeProfileBinding }),
     injectedSkillSources: runtimeContext.injectedSkillSources,
     instructionMode: runtimeContext.instructionMode,
     threadStoragePath: runtimeContext.threadStoragePath,
@@ -370,6 +373,9 @@ function buildPreparedTurnSubmitCommandPayload(
       instructions: args.runtimeContext.instructions,
       dynamicTools: args.runtimeContext.dynamicTools,
       contributedEnv: args.runtimeContext.contributedEnv,
+      ...(args.runtimeContext.claudeProfileBinding === null
+        ? {}
+        : { claudeProfileBinding: args.runtimeContext.claudeProfileBinding }),
       injectedSkillSources: args.runtimeContext.injectedSkillSources,
       instructionMode: args.runtimeContext.instructionMode,
     },

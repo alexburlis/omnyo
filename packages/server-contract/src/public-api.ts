@@ -129,6 +129,9 @@ import {
   type SystemAiServicesResponse,
   type SystemProviderCatalogEntry,
   type SystemProviderEnabledRequest,
+  type SystemClaudeProfilesRequest,
+  type SystemClaudeProfilesResult,
+  systemClaudeProfilesRequestSchema,
   type TestAiServiceRequest,
   type TestAiServiceResponse,
 } from "./api/system.js";
@@ -293,6 +296,7 @@ import type {
   HostProviderCliInstallEvent,
   HostProviderCliInstallRequest,
   HostProviderCliStatusResponse,
+  HostRtkStatusResponse,
   HostRetryUpdateResponse,
   ProjectAttachmentContentQuery,
   ProjectAttachmentUploadForm,
@@ -1258,6 +1262,12 @@ export const publicApiRoutes = {
         hostPathsExistRequestSchema,
       ),
       response: jsonResponse<HostPathsExistResponse>(),
+    }),
+    rtkStatus: defineRoute({
+      path: "/hosts/:id/tools/rtk",
+      method: "get",
+      request: noRequest<PathId>(),
+      response: jsonResponse<HostRtkStatusResponse>(),
     }),
     pickFolder: defineRoute({
       path: "/hosts/:id/pick-folder",
@@ -2735,6 +2745,14 @@ export const publicApiRoutes = {
         systemProvidersQuerySchema,
       ),
       response: jsonResponse<SystemProviderInfo[]>(),
+    }),
+    claudeProfiles: defineRoute({
+      path: "/system/providers/claude-profiles",
+      method: "post",
+      request: jsonRequest<EmptyInput, SystemClaudeProfilesRequest>(
+        systemClaudeProfilesRequestSchema,
+      ),
+      response: jsonResponse<SystemClaudeProfilesResult>(),
     }),
     providerCatalog: defineRoute({
       path: "/system/providers/catalog",

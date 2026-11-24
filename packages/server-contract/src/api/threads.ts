@@ -2,6 +2,7 @@ import { threadWorkSummarySchema } from "@omnyo/domain";
 import { z } from "zod";
 import {
   activeThinkingSchema,
+  claudeProfileSelectionSchema,
   callerExecutionInputSourceSchema,
   completedTurnDisplaySchema,
   environmentSchema,
@@ -14,6 +15,7 @@ import {
   permissionModeInputSchema,
   permissionModeSchema,
   promptInputSchema,
+  submissionIdSchema,
   promptTextMentionSchema,
   clientTurnRequestIdSchema,
   queuedMessageWaitHolderSchema,
@@ -103,6 +105,7 @@ export const createThreadRequestSchema = z
   .object({
     projectId: z.string().min(1),
     providerId: z.string().min(1).optional(),
+    claudeProfile: claudeProfileSelectionSchema.optional(),
     origin: threadCreateOriginSchema,
     originPluginId: z.string().min(1).optional(),
     pluginMetadata: pluginMetadataSchema.optional(),
@@ -777,9 +780,7 @@ export type CreateQueuedMessageRequest = z.infer<
 
 export const SUBMISSION_CONTRACT_VERSION = 1;
 
-export const submissionIdSchema = z
-  .string()
-  .regex(/^sub_[0-9a-f]{32}$/u, "submissionId must be sub_ plus 32 hex digits");
+export { submissionIdSchema } from "@omnyo/domain";
 
 export const submissionAttachmentSchema = z
   .object({

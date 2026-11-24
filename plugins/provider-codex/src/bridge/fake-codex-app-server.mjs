@@ -846,6 +846,7 @@ async function handleRequest(message) {
               parentThreadId: params.threadId,
               status: "active",
             });
+            openTurnIdsByThreadId.set(childThreadId, "turn-child-fx");
             notify("item/completed", {
               threadId: params.threadId,
               turnId,
@@ -1308,7 +1309,12 @@ async function handleRequest(message) {
         return;
       }
 
-      respond(id, { status: "applied" });
+      respond(id, {
+        status:
+          openTurnIdsByThreadId.get(params.threadId) === params.turnId
+            ? "applied"
+            : "targetUnavailable",
+      });
 
       return;
     case "thread/goal/clear":

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   clientTurnRequestIdSchema,
+  submissionIdSchema,
   backgroundTaskStatusSchema,
   backgroundTaskUsageSchema,
   extensionKindSchema,
@@ -118,6 +119,7 @@ export const timelineConversationTurnRequestStatusValues = [
 
 export const timelineConversationTurnRequestSchema = z.object({
   clientRequestId: clientTurnRequestIdSchema.nullable().default(null),
+  submissionId: submissionIdSchema.optional(),
   isGrouped: z.boolean(),
   kind: z.enum(timelineConversationTurnRequestKindValues),
   status: z.enum(timelineConversationTurnRequestStatusValues),

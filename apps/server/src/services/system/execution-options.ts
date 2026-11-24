@@ -45,6 +45,7 @@ import { resolvePluginProviderModelNotice } from "../plugins/plugin-agent-contri
 import { resolveSystemLookupHostId } from "./host-lookup.js";
 import { resolveBridgeLaunchForProviderId } from "./provider-bridge-launch.js";
 import { mapProviderMaintenanceRequests } from "./provider-maintenance-concurrency.js";
+import { requireThreadClaudeProfile } from "../providers/claude-profiles.js";
 
 type SystemExecutionOptionsRequest = SystemExecutionOptionsQuery;
 
@@ -54,6 +55,7 @@ interface BuildModelLoadErrorArgs {
 }
 
 interface ResolveSystemProviderModelsArgs {
+  claudeProfileId?: string;
   cwd?: string;
   hostId: string;
   providerId: string;
@@ -380,6 +382,9 @@ export async function resolveSystemProviderModels(
   }
 
   const result = await loadSystemProviderModels(deps, {
+    ...(args.claudeProfileId === undefined
+      ? {}
+      : { claudeProfileId: args.claudeProfileId }),
     cwd: args.cwd ?? null,
     hostId: args.hostId,
     provider,
@@ -530,6 +535,9 @@ async function resolveExecutionOptions(
   const earlyModelResultPromise =
     hostId !== null && configuredRequestedProvider
       ? loadSystemProviderModels(deps, {
+          ...(query.claudeProfileId === undefined
+            ? {}
+            : { claudeProfileId: query.claudeProfileId }),
           cwd: cwd ?? null,
           hostId,
           provider: configuredRequestedProvider,
@@ -615,12 +623,17 @@ async function resolveExecutionOptions(
   const [modelResult, modelNotice] = await Promise.all([
     earlyModelResultPromise ??
       loadSystemProviderModels(deps, {
+        ...(query.claudeProfileId === undefined
+          ? {}
+          : { claudeProfileId: query.claudeProfileId }),
         cwd: cwd ?? null,
         hostId,
         provider: modelsProvider,
         access,
       }),
-    resolveProviderModelNotice(modelsProvider.id, hostId),
+    query.claudeProfileId === undefined
+      ? resolveProviderModelNotice(modelsProvider.id, hostId)
+      : Promise.resolve(null),
   ]);
 
   const { models, selectedOnlyModels } = appendCustomModels(
@@ -662,6 +675,7 @@ async function resolveProviderModelNotice(
 async function loadSystemProviderModels(
   deps: LoggedWorkSessionDeps,
   args: {
+    claudeProfileId?: string;
     cwd: string | null;
     hostId: string;
     provider: ProviderInfo;
@@ -670,6 +684,41 @@ async function loadSystemProviderModels(
 ): Promise<ModelListResult> {
   if (!args.provider.available) {
     return unavailableProviderModelResult(args.provider.id);
+  }
+
+  if (args.claudeProfileId !== undefined) {
+    requireThreadClaudeProfile(deps, {
+      binding: { hostId: args.hostId, profileId: args.claudeProfileId },
+      hostId: args.hostId,
+      providerId: args.provider.id,
+    });
+
+    const bridgeLaunch = resolveBridgeLaunchForProviderId(
+      deps,
+      args.provider.id,
+    );
+
+    if (bridgeLaunch === null)
+      return unavailableProviderModelResult(args.provider.id);
+
+    const result = await callHostRetryableOnlineRpc(deps, {
+      hostId: args.hostId,
+      timeoutMs: 10_000,
+      command: {
+        type: "provider.list_models",
+        providerId: args.provider.id,
+        bridgeLaunch,
+        ...(args.cwd === null ? {} : { cwd: args.cwd }),
+        contributedEnv: [],
+        claudeProfileBinding: { profileId: args.claudeProfileId },
+      },
+    });
+
+    return {
+      models: result.models,
+      selectedOnlyModels: result.selectedOnlyModels,
+      modelLoadError: null,
+    };
   }
 
   const result = await deps.lifecycleDedupers.providerModelCatalogs.read(

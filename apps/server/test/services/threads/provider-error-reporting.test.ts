@@ -40,6 +40,7 @@ function seedFailure(
   info: ProviderErrorInfo | null,
   state: "actionable" | "deciding" | "held" = "actionable",
   createdAt = Date.now(),
+  providerError?: { providerId: string; detail: string },
 ) {
   const { host } = seedHostSession(harness.deps);
   const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
@@ -52,6 +53,7 @@ function seedFailure(
   const thread = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
+    providerId: providerError?.providerId,
     status: "error",
   });
 
@@ -71,6 +73,7 @@ function seedFailure(
     data: {
       providerThreadId: "provider",
       message: "private-error-marker",
+      ...(providerError === undefined ? {} : { detail: providerError.detail }),
       ...(info === null ? {} : { errorInfo: info }),
     },
   });
@@ -99,6 +102,57 @@ const unexpected: ProviderErrorInfo = {
 };
 
 describe("terminal provider diagnostics", () => {
+  it("excludes the retired Claude pool response while reporting other conflicts", async () => {
+    const capture = vi
+      .spyOn(reporting, "captureProcessError")
+      .mockImplementation(() => {});
+
+    await withTestHarness(async (harness) => {
+      const detail =
+        "API Error: 409 This conversation used an older Claude account pool. Use Account Pooler bypass for this thread to sign in directly through Claude Code, or start a new conversation to use a pooled Anthropic API key.";
+
+      const info: ProviderErrorInfo = {
+        category: "bad-request",
+        providerCode: null,
+        httpStatusCode: 409,
+      };
+
+      const retired = seedFailure(harness, info, "actionable", Date.now(), {
+        providerId: "claude-code",
+        detail,
+      });
+
+      const upstream = seedFailure(harness, info, "actionable", Date.now(), {
+        providerId: "claude-code",
+        detail: `API Error: 409 private-upstream-marker: ${detail}`,
+      });
+
+      const otherProvider = seedFailure(
+        harness,
+        info,
+        "actionable",
+        Date.now(),
+        { providerId: "codex", detail },
+      );
+
+      captureActionableProviderFailures(harness.db, [retired.thread.id]);
+      expect(capture).not.toHaveBeenCalled();
+      captureActionableProviderFailures(harness.db, [
+        upstream.thread.id,
+        otherProvider.thread.id,
+      ]);
+      captureDueProviderFailures(harness.db);
+      expect(capture).toHaveBeenCalledTimes(2);
+
+      for (const [, options] of capture.mock.calls) {
+        expect(options?.diagnostic).toMatchObject({
+          failureClass: "upstream-rejected",
+          status: 409,
+        });
+      }
+    });
+  });
+
   it("captures one actionable bound failure with safe deterministic correlation", async () => {
     const capture = vi
       .spyOn(reporting, "captureProcessError")

@@ -1,3 +1,5 @@
+import { stageTimelineFollowUp } from "@/lib/send-outbox/stage-timeline-follow-up";
+import { isBackgroundSend } from "@/lib/send-outbox/timeline-submissions";
 import { useLiveThreadSpeed } from "@/hooks/useLiveThreadSpeed";
 import { ThreadInboxReason } from "@/components/thread/ThreadInboxReason";
 import { useThreadInitialLoadPending } from "@/components/thread/ThreadInitialLoad";
@@ -11,11 +13,6 @@ import {
   useWaitingToSendEntries,
   WaitingToSendCard,
 } from "@/components/promptbox/banner/WaitingToSendCard";
-import {
-  buildOutboxMessageInput,
-  isSendOutboxAvailable,
-  stageThreadMessageInOutbox,
-} from "@/lib/send-outbox/send-outbox";
 import type { ComposerSendSlot } from "@/lib/composer-send-queue";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -131,6 +128,10 @@ import {
 } from "@/components/promptbox/banner/LazyQueuedMessagesList";
 import { useComposerTextEffects } from "@/lib/composer-text-effects";
 import { useLatestRef } from "@/hooks/useLatestRef";
+import {
+  ClaudeAccountControl,
+  type ClaudeProfileSelection,
+} from "@/components/promptbox/ClaudeAccountControl";
 import { useThreadCreationOptions } from "@/hooks/useThreadCreationOptions";
 import {
   useActiveComposerDraft,
@@ -758,6 +759,21 @@ export function ThreadDetailPromptArea({
 
   const isHandoffSelection = handoffSourceSelection?.threadId === thread.id;
 
+  const [handoffClaudeProfile, setHandoffClaudeProfile] = useState<{
+    threadId: string;
+    selection: ClaudeProfileSelection;
+  } | null>(null);
+
+  const sourceClaudeProfile: ClaudeProfileSelection =
+    thread.claudeProfileBinding
+      ? { kind: "profile", profileId: thread.claudeProfileBinding.profileId }
+      : { kind: "unprofiled" };
+
+  const selectedClaudeProfile =
+    isHandoffSelection && handoffClaudeProfile?.threadId === thread.id
+      ? handoffClaudeProfile.selection
+      : sourceClaudeProfile;
+
   const sessionOptionChoices = useThreadSessionOptionChoices({
     threadId: thread.id,
     options: sessionOptions,
@@ -794,6 +810,7 @@ export function ThreadDetailPromptArea({
     setSelectedProviderId,
     setProviderModelReasoning,
     providers,
+    claudeAccounts,
     providerOptions,
     hasMultipleProviders,
     selectedProviderComposerActions,
@@ -822,6 +839,8 @@ export function ThreadDetailPromptArea({
     serviceTierOptions,
     executionInputSources,
   } = useThreadCreationOptions({
+    claudeProfile: selectedClaudeProfile,
+    claudeProjectId: thread.projectId,
     enabled: thread.archivedAt === null,
     environmentId: thread.environmentId ?? undefined,
     environmentHostId,
@@ -907,6 +926,7 @@ export function ThreadDetailPromptArea({
     setServiceTier(handoffSourceSelection.serviceTier);
     setPermissionMode(handoffSourceSelection.permissionMode);
     setHandoffSourceSelection(null);
+    setHandoffClaudeProfile(null);
 
     const restoredDraft = stripThreadHandoffPrefix(
       handoffSeed,
@@ -1424,6 +1444,9 @@ export function ThreadDetailPromptArea({
 
         const request = {
           ...baseRequest,
+          ...(selectedProviderId === "claude-code"
+            ? { claudeProfile: selectedClaudeProfile }
+            : {}),
           providerId: selectedProviderId,
           model: effectiveSelectedModel,
           reasoningLevel,
@@ -1451,7 +1474,11 @@ export function ThreadDetailPromptArea({
               : { prepareInput: submission.prepareInput }),
           },
           queueOwner: queryClient,
-          create: (preparedRequest) => createThreadAsync(preparedRequest),
+          create: (preparedRequest, context) =>
+            createThreadAsync({
+              ...preparedRequest,
+              outbox: context,
+            }),
           send: sendMessageAsync,
           renderer: PendingThreadChat,
           prepare: async (threadId) => {
@@ -1512,6 +1539,7 @@ export function ThreadDetailPromptArea({
       restoreFailedDraft,
       reasoningLevel,
       selectedProviderId,
+      selectedClaudeProfile,
       serviceTier,
       setBottomAttachmentError,
       supportsServiceTier,
@@ -1562,38 +1590,16 @@ export function ThreadDetailPromptArea({
         if (
           !options?.sendNow &&
           !compactFirst &&
-          (await isSendOutboxAvailable())
-        ) {
-          const request = buildCreateQueuedFollowUpRequest({
+          (await stageTimelineFollowUp({
+            queryClient,
             threadId: thread.id,
-            input: submission.prepareInput
-              ? await submission.prepareInput()
-              : submission.input,
+            projectId,
+            submission,
             execution: followUpExecutionSelection,
-          });
-
-          if (request) {
-            const { id: _threadId, ...message } = request;
-
-            const staged = await buildOutboxMessageInput({
-              attachments: submission.getDraft().attachments,
-              input: message.input,
-              sourceOf: uploadedAttachmentSource,
-            });
-
-            await stageThreadMessageInOutbox({
-              attachments: staged.attachments,
-              message: {
-                ...message,
-                input: staged.input,
-                messageSource: { kind: "user" },
-              },
-              projectId,
-              threadId: thread.id,
-            });
-            setFullHistoryThreadId(null);
-          }
-
+            sourceOf: uploadedAttachmentSource,
+          }))
+        ) {
+          setFullHistoryThreadId(null);
           submission.complete();
 
           return;
@@ -1648,6 +1654,7 @@ export function ThreadDetailPromptArea({
     [
       projectId,
       captureBottomUploads,
+      queryClient,
       compactFirst,
       createHandoffThread,
       createQueuedMessage,
@@ -2160,6 +2167,20 @@ export function ThreadDetailPromptArea({
 
   const bottomExecutionConfig = useMemo(
     () => ({
+      accountControl: (disabled: boolean) => (
+        <ClaudeAccountControl
+          data={claudeAccounts.data}
+          error={claudeAccounts.error}
+          selection={selectedClaudeProfile}
+          handoff
+          disabled={disabled}
+          onSetDefault={claudeAccounts.setProjectDefault}
+          onChange={(selection) => {
+            beginHandoff();
+            setHandoffClaudeProfile({ threadId: thread.id, selection });
+          }}
+        />
+      ),
       providerRouting:
         thread.environmentId === null
           ? executionOptionsRouting
@@ -2218,6 +2239,10 @@ export function ThreadDetailPromptArea({
     }),
     [
       applyExecutionTuple,
+      claudeAccounts.data,
+      claudeAccounts.error,
+      claudeAccounts.setProjectDefault,
+      selectedClaudeProfile,
       catalogModelOptions,
       pickerSessionOptionSections,
       sessionOptionChoices.choose,
@@ -2248,6 +2273,7 @@ export function ThreadDetailPromptArea({
       supportsServiceTier,
       serviceTierOptions,
       thread.environmentId,
+      thread.id,
       thread.providerId,
     ],
   );
@@ -2765,10 +2791,18 @@ export function ThreadDetailPromptArea({
   const composerWorking =
     queuedMessagesAwaitingCompaction.length === 0 ? working : null;
 
+  const actionableQueuedMessages = useMemo(
+    () =>
+      queuedMessages.filter(
+        (message) => !isBackgroundSend(message, runtimeDisplayStatus),
+      ),
+    [queuedMessages, runtimeDisplayStatus],
+  );
+
   const listedQueuedMessages = useMemo(
     () =>
       withoutQueuedMessages(
-        queuedMessages,
+        actionableQueuedMessages,
         queuedMessagesAwaitingCompaction.filter(
           (message) =>
             message.id !== inlineEditingQueuedMessage?.queuedMessageId,
@@ -2776,7 +2810,7 @@ export function ThreadDetailPromptArea({
       ),
     [
       inlineEditingQueuedMessage?.queuedMessageId,
-      queuedMessages,
+      actionableQueuedMessages,
       queuedMessagesAwaitingCompaction,
     ],
   );
@@ -2949,7 +2983,16 @@ export function ThreadDetailPromptArea({
       queue={
         pendingInteractionNode ? null : (
           <>
-            <WaitingToSendCard entries={waitingToSendEntries} />
+            <WaitingToSendCard
+              entries={waitingToSendEntries.filter(
+                (entry) =>
+                  entry.state.kind === "paused" ||
+                  entry.action.kind !== "thread-message" ||
+                  !entry.action.message.input.some(
+                    (part) => part.submissionId === entry.submissionId,
+                  ),
+              )}
+            />
             {promptQueue}
           </>
         )
@@ -2959,7 +3002,7 @@ export function ThreadDetailPromptArea({
           ? 0
           : queuedMessagesPending
             ? queuedMessageCount
-            : queuedMessages.length
+            : actionableQueuedMessages.length
       }
       pendingInteraction={pendingInteractionNode}
       working={composerWorking}

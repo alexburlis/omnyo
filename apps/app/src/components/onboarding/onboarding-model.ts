@@ -11,6 +11,7 @@ export type OnboardingStepId =
   | "chats"
   | "browser"
   | "plugins"
+  | "skills"
   | "automations"
   | "devices";
 
@@ -25,6 +26,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
   { id: "chats", label: "Chats" },
   { id: "browser", label: "Browser" },
   { id: "plugins", label: "Plugins" },
+  { id: "skills", label: "Skills" },
   { id: "automations", label: "Automations" },
   { id: "devices", label: "Devices" },
 ];

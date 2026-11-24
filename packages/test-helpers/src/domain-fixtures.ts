@@ -139,6 +139,7 @@ export function makeThread(overrides: Partial<Thread> = {}): Thread {
     projectId: "proj_test",
     environmentId: "env_test",
     providerId: "codex",
+    claudeProfileBinding: null,
     title: "Test thread",
     titleFallback: "Test thread",
     sectionId: null,

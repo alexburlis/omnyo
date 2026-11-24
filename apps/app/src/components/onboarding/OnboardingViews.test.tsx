@@ -147,6 +147,7 @@ describe("OnboardingLayout stepper", () => {
       "Projects",
       "Chats",
       "Plugins",
+      "Skills",
       "Devices",
     ]);
 
@@ -162,6 +163,7 @@ describe("OnboardingLayout stepper", () => {
       "Agent",
       "Projects",
       "Plugins",
+      "Skills",
       "Devices",
     ]);
   });

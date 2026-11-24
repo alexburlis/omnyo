@@ -13,6 +13,7 @@ import { makeThreadQueuedMessage as makeThreadQueuedMessageFixture } from "@omny
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OmnyoHttpError, sdk } from "@/lib/sdk";
 import { subscribeComposerSubmitted } from "@/lib/composer-submissions";
+import { createThreadThroughOutbox } from "@/lib/send-outbox/send-outbox";
 import { wsManager } from "@/lib/ws";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { conversationRow } from "@/test/fixtures/thread-timeline-rows";
@@ -46,6 +47,7 @@ vi.mock("@/lib/sdk", async (importOriginal) => {
     ...actual,
     sdk: {
       threads: {
+        get: vi.fn(),
         cancelPlan: vi.fn(),
         clearGoal: vi.fn(),
         editMessage: vi.fn(),
@@ -62,6 +64,11 @@ vi.mock("@/lib/sdk", async (importOriginal) => {
     },
   };
 });
+
+vi.mock("@/lib/send-outbox/send-outbox", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/send-outbox/send-outbox")>()),
+  createThreadThroughOutbox: vi.fn(),
+}));
 
 vi.mock("@/lib/ws", () => ({
   wsManager: {
@@ -163,6 +170,42 @@ afterEach(() => {
 });
 
 describe("thread runtime mutations", () => {
+  it("durably stages a profile handoff instead of spawning a second request", async () => {
+    const { wrapper } = createQueryClientTestHarness();
+    const onStaged = vi.fn();
+    const profileId = "11111111-1111-4111-8111-111111111111";
+    vi.mocked(createThreadThroughOutbox).mockResolvedValue({
+      threadId: "thread-1",
+    });
+    vi.mocked(sdk.threads.get).mockResolvedValue(makeThreadResponse());
+    const { result } = renderHook(() => useCreateThread(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        projectId: "project-1",
+        environment: { type: "project-default" },
+        providerId: "claude-code",
+        sourceThreadId: "source-thread",
+        originKind: "handoff",
+        claudeProfile: { kind: "profile", profileId },
+        input: [{ type: "text", text: "Continue the work", mentions: [] }],
+        outbox: { pendingChatId: "pending-profile", onStaged },
+      });
+    });
+
+    expect(createThreadThroughOutbox).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        pendingChatId: "pending-profile",
+        onStaged,
+        thread: expect.objectContaining({
+          sourceThreadId: "source-thread",
+          claudeProfile: { kind: "profile", profileId },
+        }),
+      }),
+    );
+    expect(sdk.threads.spawn).not.toHaveBeenCalled();
+  });
+
   it("prefetches queued message detail as soon as a queued thread is created", async () => {
     const { queryClient, wrapper } = createQueryClientTestHarness();
     const { result } = renderHook(() => useCreateThread(), { wrapper });

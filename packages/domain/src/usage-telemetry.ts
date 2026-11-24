@@ -48,6 +48,7 @@ export const usageOnboardingStepSchema = z.enum([
   "chats",
   "browser",
   "plugins",
+  "skills",
   "automations",
   "devices",
 ]);

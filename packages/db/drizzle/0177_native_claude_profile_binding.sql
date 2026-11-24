@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `claude_profile_binding` text;

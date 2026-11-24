@@ -2,6 +2,21 @@
 
 ## Spawning Threads
 
+- The native Claude profile pilot uses `--claude-profile PROFILE_ID` or
+  `--claude-profile unprofiled`. A profile selects Claude Code when `--provider`
+  is omitted. Without this flag, a new Claude chat resolves the project default,
+  then the machine default. The selected profile and host stay fixed for that
+  chat. `omnyo provider claude-profile list --project PROJECT_ID --json` lists
+  ready profiles and the effective default. Use `add LABEL --adopt-existing` to
+  adopt the existing native sign-in, or `add LABEL` and `login PROFILE_ID` for a
+  separate sign-in. `default PROFILE_ID --project PROJECT_ID` saves a project
+  default; omit `--project` for a machine default. Account Pooler exposes the
+  same controls. Unsupported hosts and CLI versions report unavailable.
+- An explicit account handoff uses the existing handoff flags, the destination
+  `--claude-profile`, the same environment and an `@thread:SOURCE_ID` reference.
+  Reuse `--submission-id` across retries. A limit never switches profiles or
+  resends a prompt automatically. Native forks retain their source profile.
+
 - Use `omnyo thread spawn --project <project-id> --prompt "..."` to create another
   thread. For a multi-line or Markdown prompt use `--prompt-file <path>` (`-`
   reads stdin) instead of quoting it inline; `omnyo thread fork` takes it too.

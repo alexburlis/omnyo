@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import {
   collectDeclaredSessionOptions,
+  claudeProfileSelectionSchema,
   type AvailableModel,
 } from "@omnyo/domain";
 import type {
@@ -13,6 +14,8 @@ import { createCliOmnyoSdk } from "../client.js";
 import { columnWidths, printBorderlessTable } from "../table.js";
 import { outputJson } from "./helpers.js";
 import { resolveMachineEnvironmentRouting } from "./machine.js";
+import { resolveMachineHostId } from "./machine.js";
+import { resolveLocalHostId } from "../daemon.js";
 
 interface ProviderListCommandOptions {
   environment?: string;
@@ -36,6 +39,130 @@ interface IncludeSelectedOnlyModelArgs {
   selectedModel?: string;
 }
 
+interface ClaudeProfileCommandOptions {
+  machine?: string;
+  project?: string;
+  json?: boolean;
+  adoptExisting?: boolean;
+}
+
+function registerClaudeProfileCommands(
+  provider: Command,
+  getUrl: () => string,
+): void {
+  const profile = provider
+    .command("claude-profile")
+    .description("Manage owner-only native Claude profiles");
+
+  const hostId = (opts: ClaudeProfileCommandOptions) =>
+    opts.machine === undefined
+      ? resolveLocalHostId()
+      : resolveMachineHostId({ serverUrl: getUrl(), target: opts.machine });
+
+  const output = (opts: ClaudeProfileCommandOptions, result: unknown) => {
+    if (!outputJson(opts, result)) console.log(JSON.stringify(result, null, 2));
+  };
+
+  const target = (command: Command) =>
+    command
+      .option("--machine <id-or-name>", "Machine holding the native profile")
+      .option("--json", "Print machine-readable JSON output");
+
+  target(profile.command("list"))
+    .option("--project <id>", "Resolve this project's default")
+    .action(
+      action(async (opts: ClaudeProfileCommandOptions) => {
+        output(
+          opts,
+          await createCliOmnyoSdk(getUrl()).providers.claudeProfiles.list({
+            hostId: await hostId(opts),
+            ...(opts.project === undefined ? {} : { projectId: opts.project }),
+          }),
+        );
+      }),
+    );
+  target(profile.command("add <label>"))
+    .option(
+      "--adopt-existing",
+      "Adopt the existing native sign-in without changing its environment",
+    )
+    .action(
+      action(async (label: string, opts: ClaudeProfileCommandOptions) => {
+        output(
+          opts,
+          await createCliOmnyoSdk(getUrl()).providers.claudeProfiles.add({
+            hostId: await hostId(opts),
+            label,
+            ...(opts.adoptExisting ? { adoptExisting: true } : {}),
+          }),
+        );
+      }),
+    );
+
+  for (const [command, method] of [
+    ["status", "status"],
+    ["login", "loginStart"],
+    ["login-status", "loginGet"],
+    ["login-cancel", "loginCancel"],
+  ] as const) {
+    target(profile.command(`${command} <profileId>`)).action(
+      action(async (profileId: string, opts: ClaudeProfileCommandOptions) => {
+        output(
+          opts,
+          await createCliOmnyoSdk(getUrl()).providers.claudeProfiles[method]({
+            hostId: await hostId(opts),
+            profileId,
+          }),
+        );
+      }),
+    );
+  }
+
+  target(profile.command("default <profileId-or-unprofiled>"))
+    .option(
+      "--project <id>",
+      "Save a project default instead of the machine default",
+    )
+    .action(
+      action(async (value: string, opts: ClaudeProfileCommandOptions) => {
+        const selection = claudeProfileSelectionSchema.parse(
+          value === "unprofiled"
+            ? { kind: "unprofiled" }
+            : { kind: "profile", profileId: value },
+        );
+
+        output(
+          opts,
+          await createCliOmnyoSdk(
+            getUrl(),
+          ).providers.claudeProfiles.defaultsSet({
+            hostId: await hostId(opts),
+            selection,
+            ...(opts.project === undefined ? {} : { projectId: opts.project }),
+          }),
+        );
+      }),
+    );
+  profile
+    .command("pilot <enable-or-disable>")
+    .description(
+      "Enable or disable the native Claude profile pilot on the private owner coordinator",
+    )
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (value: string, opts: ClaudeProfileCommandOptions) => {
+        if (value !== "enable" && value !== "disable")
+          throw new Error("Choose enable or disable.");
+        output(
+          opts,
+          await createCliOmnyoSdk(getUrl()).providers.claudeProfiles.pilotSet({
+            enabled: value === "enable",
+          }),
+        );
+      }),
+    );
+}
+
 function addProviderRoutingOptions(command: Command): Command {
   return command
     .option("--machine <id-or-name>", "Machine whose providers should be used")
@@ -53,6 +180,8 @@ export function registerProviderCommands(
   const provider = program
     .command("provider")
     .description("Manage providers and inspect their models");
+
+  registerClaudeProfileCommands(provider, getUrl);
 
   addProviderRoutingOptions(provider.command("list"))
     .description("List available providers")

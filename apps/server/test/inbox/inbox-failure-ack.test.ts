@@ -16,6 +16,7 @@ import {
   INBOX_CALLER_THREAD_HEADER,
   inboxFailureAcknowledgeResponseSchema,
   inboxFailureListResponseSchema,
+  threadWorkSummarySchema,
   turnScope,
 } from "@omnyo/domain";
 import { and, eq } from "drizzle-orm";
@@ -58,7 +59,10 @@ interface FailureFixture {
   turn: RunningTurn;
 }
 
-async function seedFailure(harness: TestAppHarness): Promise<FailureFixture> {
+async function seedFailure(
+  harness: TestAppHarness,
+  status: "failed" | "interrupted" = "interrupted",
+): Promise<FailureFixture> {
   const world = seedInboxWorld(harness, "host-failure-ack");
   const parent = seedChat(world);
   const child = seedChat(world, { parentThreadId: parent.id });
@@ -80,7 +84,7 @@ async function seedFailure(harness: TestAppHarness): Promise<FailureFixture> {
       },
     },
   ]);
-  await endTurn(world, turn, "interrupted");
+  await endTurn(world, turn, status);
   await runInboxSweep(harness.deps, Date.now() + 31_000);
 
   const failure = harness.db
@@ -89,7 +93,7 @@ async function seedFailure(harness: TestAppHarness): Promise<FailureFixture> {
     .where(eq(threadFailures.threadId, child.id))
     .get();
 
-  if (failure === undefined) throw new Error("Missing interruption");
+  if (failure === undefined) throw new Error("Missing failure");
 
   return {
     world,
@@ -252,6 +256,112 @@ describe("exact failure acknowledgment on the real server", () => {
           .acknowledged,
       ).toBe(false);
       expect(rows(harness)).toEqual(after);
+    });
+  });
+
+  it("settles an inactive failed child and removes its inherited wait without replay", async () => {
+    await withTestHarness(async (harness) => {
+      const fixture = await seedFailure(harness, "failed");
+      const { world, childId, parentId, turn, failureId } = fixture;
+
+      const readWork = async (threadId: string) => {
+        const response = await harness.app.request(
+          `/api/v1/threads/${threadId}/work`,
+        );
+
+        expect(response.status).toBe(200);
+
+        return threadWorkSummarySchema.parse(await response.json());
+      };
+
+      expect(getThread(harness.db, childId)?.status).toBe("error");
+      expect((await readWork(childId)).failures).toContainEqual({
+        code: "run-failed",
+        text: "The last agent run failed and needs recovery.",
+        sourceId: childId,
+      });
+      expect((await readWork(parentId)).waits).toContainEqual(
+        expect.objectContaining({ id: childId }),
+      );
+      const before = rows(harness);
+
+      const originalFailure = before.failures.find(
+        (failure) => failure.id === failureId,
+      );
+
+      expect(originalFailure).toMatchObject({
+        state: "actionable",
+        turnId: turn.turnId,
+        requestId: fixture.requestId,
+        reason: "Provider overloaded",
+        retryQueuedMessageId: null,
+        decisionDeadline: null,
+      });
+      expect(pendingSubmitCount(world, childId)).toBe(0);
+      const startedTurns = world.turnCounter.value;
+
+      const response = await acknowledge(fixture);
+      expect(response.status).toBe(200);
+      expect(
+        inboxFailureAcknowledgeResponseSchema.parse(await response.json()),
+      ).toMatchObject({
+        failure: {
+          id: failureId,
+          turnId: turn.turnId,
+          requestId: fixture.requestId,
+          state: "resolved",
+          resolvedBy: "acknowledged",
+        },
+        acknowledged: true,
+      });
+      const after = rows(harness);
+      expect(after.history).toEqual(before.history);
+      expect(after.inputs).toEqual(before.inputs);
+      expect(after.failures).toEqual([
+        expect.objectContaining({
+          ...originalFailure,
+          state: "resolved",
+          resolvedBy: "acknowledged",
+          resolvedAt: expect.any(Number),
+          updatedAt: expect.any(Number),
+        }),
+      ]);
+      expect(after.receipts).toHaveLength(before.receipts.length + 1);
+      expect(after.receipts.at(-1)).toMatchObject({
+        threadId: childId,
+        rootThreadId: parentId,
+        outcomeRef: failureId,
+        summary: expect.stringContaining(
+          "Preparation was completed and verified by the parent.",
+        ),
+        handledAt: expect.any(Number),
+      });
+
+      for (const receipt of before.receipts)
+        expect(after.receipts).toContainEqual({
+          ...receipt,
+          ...(receipt.id === originalFailure?.receiptId
+            ? { handledAt: expect.any(Number) }
+            : {}),
+        });
+      expect(getThread(harness.db, childId)?.status).toBe("idle");
+      expect((await readWork(childId)).failures).toEqual([]);
+      expect((await readWork(parentId)).waits).not.toContainEqual(
+        expect.objectContaining({ id: childId }),
+      );
+      expect(pendingSubmitCount(world, childId)).toBe(0);
+      expect(world.turnCounter.value).toBe(startedTurns);
+
+      const repeated = await acknowledge(fixture);
+      expect(repeated.status).toBe(200);
+      expect(
+        inboxFailureAcknowledgeResponseSchema.parse(await repeated.json())
+          .acknowledged,
+      ).toBe(false);
+      expect(rows(harness)).toEqual(after);
+      expect(getThread(harness.db, childId)?.status).toBe("idle");
+      expect(pendingSubmitCount(world, childId)).toBe(0);
+      expect(world.turnCounter.value).toBe(startedTurns);
     });
   });
 
@@ -439,7 +549,7 @@ describe("exact failure acknowledgment on the real server", () => {
     });
   });
 
-  it.each(["active", "starting", "stopping", "pending", "error"] as const)(
+  it.each(["active", "starting", "stopping", "pending"] as const)(
     "refuses %s targets without mutation",
     async (status) => {
       await withTestHarness(async (harness) => {
@@ -456,31 +566,34 @@ describe("exact failure acknowledgment on the real server", () => {
     },
   );
 
-  it("refuses a live stored turn even if the chat status is stale idle", async () => {
-    await withTestHarness(async (harness) => {
-      const fixture = await seedFailure(harness);
-      await postDaemonEvents(fixture.world, [
-        {
-          threadId: fixture.childId,
-          event: {
-            type: "turn/started",
+  it.each(["idle", "error"] as const)(
+    "refuses a live stored turn even if the chat status is stale %s",
+    async (status) => {
+      await withTestHarness(async (harness) => {
+        const fixture = await seedFailure(harness);
+        await postDaemonEvents(fixture.world, [
+          {
             threadId: fixture.childId,
-            providerThreadId:
-              fixture.world.providerThreadIds.get(fixture.childId) ?? "",
-            scope: turnScope("turn-new-active"),
+            event: {
+              type: "turn/started",
+              threadId: fixture.childId,
+              providerThreadId:
+                fixture.world.providerThreadIds.get(fixture.childId) ?? "",
+              scope: turnScope("turn-new-active"),
+            },
           },
-        },
-      ]);
-      harness.db
-        .update(threads)
-        .set({ status: "idle" })
-        .where(eq(threads.id, fixture.childId))
-        .run();
-      const before = rows(harness);
-      expect((await acknowledge(fixture)).status).toBe(409);
-      expect(rows(harness)).toEqual(before);
-    });
-  });
+        ]);
+        harness.db
+          .update(threads)
+          .set({ status })
+          .where(eq(threads.id, fixture.childId))
+          .run();
+        const before = rows(harness);
+        expect((await acknowledge(fixture)).status).toBe(409);
+        expect(rows(harness)).toEqual(before);
+      });
+    },
+  );
 
   it.each(["deciding", "held", "resolved"] as const)(
     "refuses a failure in %s state",

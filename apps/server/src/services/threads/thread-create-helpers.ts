@@ -127,6 +127,7 @@ export function createThreadRecord(
       projectId: args.request.projectId,
       environmentId: args.environmentId,
       providerId: args.request.providerId,
+      claudeProfileBinding: args.request.claudeProfileBinding ?? null,
       title:
         args.request.title ?? source?.title ?? source?.titleFallback ?? null,
       titleFallback: source?.titleFallback ?? args.request.titleFallback,

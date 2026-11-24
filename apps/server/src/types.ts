@@ -36,6 +36,7 @@ export interface ServerRuntimeConfig {
   inheritedSkillsRootPaths: string[];
   isDevelopment: boolean;
   performanceDiagnosticsAvailable: boolean;
+  nativeClaudeProfilesOwnerPilotAvailable: boolean;
   serverPort: number;
   sharedSkillRoots: ProviderNativeSkillRoots;
   appUrl?: string;

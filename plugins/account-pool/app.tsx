@@ -76,6 +76,7 @@ import type {
 } from "./src/contracts.js";
 import type { accountPoolRpcContract } from "./src/rpc.js";
 import type { CodexDeviceLoginStart } from "./src/codex-device-login.js";
+import { NativeClaudeProfiles } from "./NativeClaudeProfiles.js";
 import {
   CLAUDE_POOL_LOGIN_RETIRED,
   DEFAULT_ACCOUNT_POOL_CONFIG,
@@ -1262,6 +1263,7 @@ function AccountPoolSettings() {
 
   return (
     <div className="w-full space-y-6">
+      <NativeClaudeProfiles />
       {parent === null ? null : (
         <div className="rounded-lg border border-border px-4 py-3">
           <div className="flex items-start justify-between gap-4">

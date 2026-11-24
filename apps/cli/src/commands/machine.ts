@@ -755,6 +755,28 @@ export function registerMachineCommands(
       }),
     );
 
+  machine
+    .command("rtk-status <id-or-name>")
+    .description("Check whether RTK is on the machine's agent PATH")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (target: string, opts: MachineListCommandOptions) => {
+        const serverUrl = getUrl();
+        const hostId = await resolveMachineHostId({ serverUrl, target });
+
+        const result = await createCliOmnyoSdk(serverUrl).hosts.rtkStatus({
+          hostId,
+        });
+
+        if (outputJson(opts, result)) return;
+        console.log(
+          result.installed
+            ? "RTK is installed"
+            : "RTK is missing from the agent PATH",
+        );
+      }),
+    );
+
   const providerCli = machine
     .command("provider-cli")
     .description("Inspect and install provider CLIs on a machine");

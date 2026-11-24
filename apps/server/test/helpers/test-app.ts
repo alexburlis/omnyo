@@ -287,6 +287,7 @@ export async function createTestAppHarness(
     dataDir,
     featureFlags: defaultFeatureFlags,
     performanceDiagnosticsAvailable: false,
+    nativeClaudeProfilesOwnerPilotAvailable: false,
     hostDaemonPort: 3001,
     inheritedSkillsRootPaths: [],
     isDevelopment: true,

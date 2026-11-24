@@ -71,6 +71,7 @@ function createRuntimeConfig(): ServerRuntimeConfig {
     inheritedSkillsRootPaths: [],
     isDevelopment: false,
     performanceDiagnosticsAvailable: false,
+    nativeClaudeProfilesOwnerPilotAvailable: false,
     serverPort: 38886,
     sharedSkillRoots: { user: [], project: [] },
   };

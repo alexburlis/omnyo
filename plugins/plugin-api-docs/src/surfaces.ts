@@ -725,6 +725,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Run every thread started with it through a bridge the plugin ships",
           "Report context usage, service tiers, and install status",
           "Explain a provider's model list in one line, such as which account it uses",
+          "Manage native Claude profiles through api.sdk.providers.claudeProfiles in the private owner pilot and forward the selected profile in NewThreadRequest",
         ],
         apiSymbols: [
           "contextSnapshotSchema",
@@ -748,6 +749,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "experimental_spawnPortableProcess",
           "experimental_killPortableProcess",
           "PluginProviders",
+          "NewThreadRequest",
         ],
         firstParty: [
           "ACP Providers",

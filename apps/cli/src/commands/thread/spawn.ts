@@ -8,6 +8,7 @@ import {
   type EnvironmentMachineSelection,
   type Thread,
   type JsonValue,
+  claudeProfileSelectionSchema,
 } from "@omnyo/domain";
 import {
   submissionIdSchema,
@@ -62,6 +63,7 @@ interface ThreadSpawnCommandOptions {
   baseBranch?: string;
   parentThread?: string;
   provider?: string;
+  claudeProfile?: string;
   model?: string;
   reasoningLevel?: string;
   title?: string;
@@ -415,6 +417,10 @@ export function registerSpawnCommand(
     .option("--parent-self", "Parent the new thread to OMNYO_THREAD_ID")
     .option("--provider <id>", PROVIDER_HELP)
     .option(
+      "--claude-profile <id-or-unprofiled>",
+      "Native Claude profile for this chat, or unprofiled to use the existing authentication path",
+    )
+    .option(
       "--model <model>",
       "Model ID for the thread. Omit to use the project's remembered default for the resolved provider",
     )
@@ -672,7 +678,18 @@ export function registerSpawnCommand(
         const sendAt =
           opts.sendAt === undefined ? undefined : parseSendAt(opts.sendAt);
 
-        const providerId = opts.provider?.trim();
+        const claudeProfile =
+          opts.claudeProfile === undefined
+            ? undefined
+            : claudeProfileSelectionSchema.parse(
+                opts.claudeProfile === "unprofiled"
+                  ? { kind: "unprofiled" }
+                  : { kind: "profile", profileId: opts.claudeProfile },
+              );
+
+        const providerId =
+          opts.provider?.trim() ??
+          (claudeProfile?.kind === "profile" ? "claude-code" : undefined);
 
         let thread: Thread;
 
@@ -697,6 +714,7 @@ export function registerSpawnCommand(
             origin: "cli",
             projectId,
             ...(providerId ? { providerId } : {}),
+            ...(claudeProfile === undefined ? {} : { claudeProfile }),
             ...(opts.model ? { model: opts.model } : {}),
             input,
             ...(reasoningLevel ? { reasoningLevel } : {}),

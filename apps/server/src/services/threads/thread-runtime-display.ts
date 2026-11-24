@@ -152,6 +152,7 @@ function toPublicThread(thread: Thread): Thread {
     projectId: thread.projectId,
     environmentId: thread.environmentId,
     providerId: thread.providerId,
+    claudeProfileBinding: thread.claudeProfileBinding,
     title: thread.title,
     titleFallback: thread.titleFallback,
     sectionId: thread.sectionId,

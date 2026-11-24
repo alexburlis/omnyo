@@ -41,6 +41,8 @@ let storeId: string | null = null;
 
 let snapshot: readonly OutboxEntry[] = EMPTY_ENTRIES;
 
+let snapshotRevision = 0;
+
 const snapshotListeners = new Set<() => void>();
 
 interface NewChatWaiter {
@@ -97,9 +99,12 @@ async function settleNewChatWaiters(
 }
 
 async function refreshSnapshot(store: SendOutboxStore): Promise<void> {
+  const revision = ++snapshotRevision;
   const entries = await store.list();
 
   await settleNewChatWaiters(store, entries);
+
+  if (revision !== snapshotRevision) return;
 
   snapshot =
     storeId === null
@@ -216,6 +221,7 @@ export async function buildOutboxMessageInput(args: {
 }
 
 export async function stageThreadMessageInOutbox(args: {
+  submissionId: string;
   attachments: OutboxAttachment[];
   message: CreateQueuedMessageRequest;
   projectId: string;
@@ -229,8 +235,8 @@ export async function stageThreadMessageInOutbox(args: {
 
   const { drainer, store } = ensureRuntime();
 
-  await store.stage({
-    submissionId: createSubmissionId(),
+  const staged = await store.stage({
+    submissionId: args.submissionId,
     storeId: resolvedStoreId,
     createdAt: Date.now(),
     action: {
@@ -241,6 +247,13 @@ export async function stageThreadMessageInOutbox(args: {
     },
     attachments: args.attachments,
   });
+
+  snapshot = [
+    ...snapshot.filter((entry) => entry.submissionId !== staged.submissionId),
+    staged,
+  ];
+
+  for (const listener of snapshotListeners) listener();
   drainer.wake();
 
   return "staged";

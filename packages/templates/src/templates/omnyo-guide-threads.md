@@ -9,6 +9,18 @@ Thread commands
 
 Every command supports --json for machine-readable output.
 
+For the native Claude profile pilot, `thread spawn --claude-profile ID`
+selects one ready profile and its machine before creating the chat. It selects
+the Claude Code provider when `--provider` is omitted. `--claude-profile
+unprofiled` explicitly keeps the existing authentication path. Without the flag,
+a new Claude chat uses its project default, then its machine default. The saved
+binding does not change when defaults change. To continue with another account,
+create a handoff with `--origin-kind handoff --source-thread ID`, the destination
+`--claude-profile`, the same environment, and a prompt containing `@thread:ID`.
+Reuse `--submission-id` when retrying that creation. SDK callers pass the same
+selection as `claudeProfile: {kind: "profile", profileId: ID}` or
+`{kind: "unprofiled"}` to `threads.submissions.spawn`.
+
 Native questions and callback dependencies:
 
   omnyo question list [<thread-id>] [--self] --json

@@ -37,6 +37,8 @@ export interface ThreadCreateServiceRequestInput {
   permissionMode?: CreateThreadRequest["permissionMode"];
   projectId: string;
   providerId?: CreateThreadRequest["providerId"];
+  claudeProfile?: CreateThreadRequest["claudeProfile"];
+  claudeProfileBinding?: import("@omnyo/domain").ClaudeProfileBinding | null;
   reasoningLevel?: CreateThreadRequest["reasoningLevel"];
   serviceTier?: CreateThreadRequest["serviceTier"];
   sessionOptions?: CreateThreadRequest["sessionOptions"];

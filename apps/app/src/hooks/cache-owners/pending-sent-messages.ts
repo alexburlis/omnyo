@@ -1,5 +1,4 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { ClientTurnRequestId } from "@omnyo/domain";
 import type {
   TimelineRow,
   TimelineUserConversationRow,
@@ -133,16 +132,19 @@ export function subscribePendingSentMessages(
 function collectSentRequestIds(
   rows: readonly TimelineRow[],
   threadId: string,
-  sent: Set<ClientTurnRequestId>,
+  sent: Set<string>,
 ): void {
   for (const row of rows) {
     if (
       row.threadId === threadId &&
       row.kind === "conversation" &&
-      row.role === "user" &&
-      row.turnRequest.clientRequestId !== null
-    )
-      sent.add(row.turnRequest.clientRequestId);
+      row.role === "user"
+    ) {
+      if (row.turnRequest.clientRequestId)
+        sent.add(row.turnRequest.clientRequestId);
+
+      if (row.turnRequest.submissionId) sent.add(row.turnRequest.submissionId);
+    }
 
     if (row.kind === "turn" && row.children !== null)
       collectSentRequestIds(row.children, threadId, sent);
@@ -156,11 +158,9 @@ function collectSentRequestIds(
   }
 }
 
-function isSent(
-  entry: PendingSentMessage,
-  sent: ReadonlySet<ClientTurnRequestId>,
-): boolean {
-  const requestId = entry.row.turnRequest.clientRequestId;
+function isSent(entry: PendingSentMessage, sent: ReadonlySet<string>): boolean {
+  const requestId =
+    entry.row.turnRequest.submissionId ?? entry.row.turnRequest.clientRequestId;
 
   return requestId !== null && sent.has(requestId);
 }
@@ -200,7 +200,7 @@ export function beginPendingSentMessageRead({
 
   return (timeline) => {
     updateEntries(queryClient, threadId, (entries) => {
-      const sent = new Set<ClientTurnRequestId>();
+      const sent = new Set<string>();
       collectSentRequestIds(timeline.rows, threadId, sent);
       let changed = false;
       const next = new Map<string, PendingSentMessage>();
@@ -236,7 +236,7 @@ export function withPendingSentMessages({
   threadId,
 }: WithPendingSentMessagesArgs): TimelineRow[] {
   if (pending.length === 0) return rows;
-  const sent = new Set<ClientTurnRequestId>();
+  const sent = new Set<string>();
   collectSentRequestIds(rows, threadId, sent);
 
   const unsent = pending.filter(

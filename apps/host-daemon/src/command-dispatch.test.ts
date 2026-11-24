@@ -2578,6 +2578,30 @@ describe("dispatchCommand", () => {
     );
   });
 
+  it("checks for RTK on the agent PATH without running it", async () => {
+    const agentPath = await makeTempDir("omnyo-rtk-status-");
+
+    const manager = new RuntimeManager({
+      createRuntime: () => createRuntime(),
+      provisionWorkspace: async () => createWorkspace(),
+      shellEnv: { PATH: agentPath },
+    });
+
+    const options = makeDispatchOptions({ runtimeManager: manager });
+    const command = { type: "host.rtk_status" } as const;
+
+    await expect(dispatchOnlineRpcCommand(command, options)).resolves.toEqual({
+      installed: false,
+    });
+
+    const executable = process.platform === "win32" ? "rtk.exe" : "rtk";
+    await fs.writeFile(path.join(agentPath, executable), "", { mode: 0o755 });
+
+    await expect(dispatchOnlineRpcCommand(command, options)).resolves.toEqual({
+      installed: true,
+    });
+  });
+
   it("routes provider health and usage to the targeted bridge runtime", async () => {
     const runtime = createRuntime();
 

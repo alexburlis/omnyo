@@ -106,6 +106,7 @@ export function makeThreadResponse(
     projectId: "project-1",
     environmentId: null,
     providerId: "test-provider",
+    claudeProfileBinding: null,
     title: null,
     titleFallback: null,
     sectionId: null,

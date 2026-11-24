@@ -1,4 +1,4 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, type ReactNode } from "react";
 import type {
   PermissionMode,
   ProviderInfo,
@@ -89,6 +89,7 @@ export interface ExecutionAgentOptionsConfig {
 }
 
 export interface ExecutionControlsProps {
+  accountControl?: (disabled: boolean) => ReactNode;
   providerRouting?: SystemProvidersQuery;
   catalog: ExecutionCatalogConfig;
   provider: ExecutionProviderConfig;
@@ -105,6 +106,7 @@ export interface ExecutionControlsProps {
 }
 
 export const ExecutionControls = memo(function ExecutionControls({
+  accountControl,
   catalog,
   provider,
   providerRouting,
@@ -191,6 +193,7 @@ export const ExecutionControls = memo(function ExecutionControls({
           selects={selects}
         />
       ) : null}
+      {accountControl?.(disabled ?? false)}
     </>
   );
 });

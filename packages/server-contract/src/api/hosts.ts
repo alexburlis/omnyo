@@ -178,6 +178,9 @@ export type HostPathsExistRequest = PathsExistRequest;
 
 export type HostPathsExistResponse = PathsExistResponse;
 
+export type HostRtkStatusResponse =
+  HostDaemonOnlineRpcResult<"host.rtk_status">;
+
 export const hostPickFolderRequestSchema = z
   .object({
     clientHostId: z.string().min(1),

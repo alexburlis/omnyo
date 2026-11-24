@@ -29,14 +29,14 @@ describe("onboardingSteps", () => {
         chatImporterEnabled: false,
         automationsEnabled: false,
       }).map((step) => step.id),
-    ).toEqual(["agent", "projects", "browser", "plugins", "devices"]);
+    ).toEqual(["agent", "projects", "browser", "plugins", "skills", "devices"]);
     expect(
       onboardingSteps({
         browserLogins: false,
         chatImporterEnabled: false,
         automationsEnabled: false,
       }).map((step) => step.id),
-    ).toEqual(["agent", "projects", "plugins", "devices"]);
+    ).toEqual(["agent", "projects", "plugins", "skills", "devices"]);
   });
 });
 
@@ -547,7 +547,7 @@ describe("onboardingSteps with the chat importer", () => {
         chatImporterEnabled: true,
         automationsEnabled: false,
       }).map((entry) => entry.id),
-    ).toEqual(["agent", "projects", "chats", "plugins", "devices"]);
+    ).toEqual(["agent", "projects", "chats", "plugins", "skills", "devices"]);
   });
 
   it("keeps chats right after projects when browser logins are also offered", () => {
@@ -557,7 +557,15 @@ describe("onboardingSteps with the chat importer", () => {
         chatImporterEnabled: true,
         automationsEnabled: false,
       }).map((entry) => entry.id),
-    ).toEqual(["agent", "projects", "chats", "browser", "plugins", "devices"]);
+    ).toEqual([
+      "agent",
+      "projects",
+      "chats",
+      "browser",
+      "plugins",
+      "skills",
+      "devices",
+    ]);
   });
 
   it("drops chats when the chat importer is not enabled", () => {
@@ -567,7 +575,7 @@ describe("onboardingSteps with the chat importer", () => {
         chatImporterEnabled: false,
         automationsEnabled: false,
       }).map((entry) => entry.id),
-    ).toEqual(["agent", "projects", "plugins", "devices"]);
+    ).toEqual(["agent", "projects", "plugins", "skills", "devices"]);
   });
 });
 
@@ -704,6 +712,7 @@ describe("automations step", () => {
       "agent",
       "projects",
       "plugins",
+      "skills",
       "automations",
       "devices",
     ]);

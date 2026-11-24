@@ -1,3 +1,8 @@
+import {
+  claudeProfileIdSchema,
+  claudeProfileManageCommandSchema,
+  claudeProfileManagementResultSchema,
+} from "./claude-profiles.js";
 import { hostHousekeepingStatusSchema } from "./housekeeping.js";
 import {
   desktopBrowserCommandSchemas,
@@ -274,6 +279,10 @@ const hostPreviewEnsureCommandSchema = z
 const hostDaemonThreadRuntimeContextSchema = z
   .object({
     workspaceContext: workspaceContextSchema,
+    claudeProfileBinding: z
+      .object({ profileId: claudeProfileIdSchema })
+      .strict()
+      .optional(),
     projectId: z.string().min(1),
     providerId: z.string().min(1),
     bridgeLaunch: hostDaemonBridgeLaunchSchema,
@@ -1038,6 +1047,10 @@ const hostListBranchOptionsCommandSchema = z
 
 const providerListModelsCommandSchema = z.object({
   type: z.literal("provider.list_models"),
+  claudeProfileBinding: z
+    .object({ profileId: claudeProfileIdSchema })
+    .strict()
+    .optional(),
   providerId: z.string().min(1),
   bridgeLaunch: hostDaemonBridgeLaunchSchema,
   cwd: z.string().min(1).optional(),
@@ -2116,6 +2129,15 @@ export const hostDaemonCommandRegistry = {
     flushEventsBeforeResult: false,
     envLane: null,
   }),
+  "host.rtk_status": defineHostDaemonCommandDescriptor({
+    type: "host.rtk_status",
+    schema: z.object({ type: z.literal("host.rtk_status") }).strict(),
+    resultSchema: z.object({ installed: z.boolean() }).strict(),
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
   "host.agent_processes.terminate": defineHostDaemonCommandDescriptor({
     type: "host.agent_processes.terminate",
     schema: hostAgentProcessesTerminateCommandSchema,
@@ -2347,6 +2369,15 @@ export const hostDaemonCommandRegistry = {
     type: "host.write_file",
     schema: hostWriteFileCommandSchema,
     resultSchema: fileWriteResultSchema,
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "claude-profile/manage": defineHostDaemonCommandDescriptor({
+    type: "claude-profile/manage",
+    schema: claudeProfileManageCommandSchema,
+    resultSchema: claudeProfileManagementResultSchema,
     transport: "onlineRpc",
     retryable: false,
     flushEventsBeforeResult: false,

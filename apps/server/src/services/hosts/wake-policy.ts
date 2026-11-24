@@ -1,6 +1,7 @@
 import { type HostDaemonRpcCommand } from "@omnyo/host-daemon-contract";
 
 const hostCommandWakePolicy = {
+  "claude-profile/manage": "never",
   "host.housekeeping.status": "never",
   "host.preview.status": "never",
   "host.preview.ensure": "work",
@@ -64,6 +65,7 @@ const hostCommandWakePolicy = {
   "host.remove_path": "work",
   "host.browse_directory": "work",
   "host.paths_exist": "work",
+  "host.rtk_status": "never",
   "host.agent_processes.terminate": "never",
   "host.prepare_workspace_identity_v1": "work",
   "project.inspect": "work",

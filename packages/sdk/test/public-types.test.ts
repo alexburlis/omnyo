@@ -310,6 +310,7 @@ type ExpectedHostsKey =
   | "experimental_resume"
   | "experimental_retryCleanup"
   | "retryUpdate"
+  | "rtkStatus"
   | "experimental_setAvailability"
   | "experimental_suspend"
   | "experimental_reconcile"
@@ -386,7 +387,12 @@ type ExpectedProjectAttachmentsKey =
   | "read"
   | "upload";
 
-type ExpectedProvidersKey = "catalog" | "list" | "models" | "setEnabled";
+type ExpectedProvidersKey =
+  | "catalog"
+  | "claudeProfiles"
+  | "list"
+  | "models"
+  | "setEnabled";
 
 type ExpectedStatusKey = "get";
 

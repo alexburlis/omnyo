@@ -13,13 +13,20 @@ import {
   type ErrorDiagnosticContext,
 } from "@omnyo/process-utils/error-reporting";
 import { listOpenFailures } from "../inbox/store.js";
-import { buildTurnFailedEvent, loadFailedTurn } from "./turn-failed.js";
+import {
+  buildTurnFailedEvent,
+  loadFailedTurn,
+  loadFailedTurnErrorMessage,
+} from "./turn-failed.js";
 
 const observationStartedAt = Date.now();
 
 const reportedFailures = new WeakMap<DbConnection, Set<string>>();
 
 const MAX_REPORTED_FAILURES = 4096;
+
+const RETIRED_CLAUDE_POOL_ERROR =
+  "API Error: 409 This conversation used an older Claude account pool. Use Account Pooler bypass for this thread to sign in directly through Claude Code, or start a new conversation to use a pooled Anthropic API key.";
 
 const expectedCodes = new Set([
   "provision_cancelled",
@@ -79,13 +86,14 @@ export function captureActionableProviderFailures(
       continue;
     const failed = buildTurnFailedEvent(db, failure.threadId);
     const request = loadFailedTurn(db, failure.threadId);
+    const thread = getThread(db, failure.threadId);
 
     if (
       failed === null ||
       request === null ||
       failure.requestId === null ||
       failure.requestId !== failed.requestId ||
-      getThread(db, failure.threadId)?.status !== "error"
+      thread?.status !== "error"
     )
       continue;
     seen.add(failure.id);
@@ -98,11 +106,17 @@ export function captureActionableProviderFailures(
 
     if (!getAppSettings(db).crashReportsEnabled) continue;
 
-    const category = failed.errorInfo?.category;
+    const errorInfo = failed.errorInfo;
+    const category = errorInfo?.category;
 
     if (
       (category !== undefined && expectedCategories.has(category)) ||
-      expectedCodes.has(failed.errorInfo?.providerCode ?? "")
+      expectedCodes.has(errorInfo?.providerCode ?? "") ||
+      (thread.providerId === "claude-code" &&
+        category === "bad-request" &&
+        errorInfo?.httpStatusCode === 409 &&
+        errorInfo.providerCode === null &&
+        loadFailedTurnErrorMessage(db, thread.id) === RETIRED_CLAUDE_POOL_ERROR)
     )
       continue;
 
@@ -129,7 +143,7 @@ export function captureActionableProviderFailures(
     if (
       expectedFailure === true ||
       expectedCodes.has(commandCode ?? "") ||
-      (failed.errorInfo === null &&
+      (errorInfo === null &&
         (commandCode === undefined || expectedFailure !== false))
     )
       continue;
@@ -140,7 +154,7 @@ export function captureActionableProviderFailures(
       .slice(0, 32);
 
     const operationId = `${eventId.slice(0, 8)}-${eventId.slice(8, 12)}-${eventId.slice(12, 16)}-${eventId.slice(16, 20)}-${eventId.slice(20)}`;
-    const status = failed.errorInfo?.httpStatusCode;
+    const status = errorInfo?.httpStatusCode;
     const error = new Error("Provider operation failed");
     error.stack = undefined;
     captureProcessError(error, {

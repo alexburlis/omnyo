@@ -88,6 +88,10 @@ import {
   resolveModelCatalogSelection,
   resolveModelReasoningLevel,
 } from "./thread-creation-options/model-catalog-selection";
+import {
+  useClaudeAccounts,
+  type ClaudeProfileSelection,
+} from "./useClaudeAccounts";
 
 export { formatModelLabel };
 
@@ -130,6 +134,8 @@ type SessionOptionSelectionsForProvider = (
 ) => SessionOptionSelections;
 
 interface UseThreadCreationOptionsResult<TExecutionInputSources> {
+  claudeAccounts: ReturnType<typeof useClaudeAccounts>;
+  claudeProfileSelection: ClaudeProfileSelection | undefined;
   executionOptionsRouting: SystemProvidersQuery;
   selectedProviderId: string;
   setSelectedProviderId: StringSelectionSetter;
@@ -258,6 +264,10 @@ export function useThreadCreationOptions(
   options?: UsePromptModelReasoningOptions,
 ): UseThreadCreationOptionsResult<ScopedExecutionInputSources> {
   const {
+    claudeProfile,
+    claudeProfileChoice,
+    claudeProjectId,
+    resolveClaudeProfileHostId,
     enabled = true,
     environmentId,
     environmentHostId,
@@ -485,14 +495,49 @@ export function useThreadCreationOptions(
     ? rawSelectedProviderId || undefined
     : undefined;
 
-  const executionOptionsQuery = useSystemExecutionOptions({
-    enabled: executionOptionsQueryEnabled,
-    ...executionOptionsRouting,
-    providerId: executionOptionsProviderId,
-  });
-
   const hostsQuery = useHosts();
   const systemConfig = useSystemConfig();
+
+  const claudeHostId = resolveClaudeProfileHostId
+    ? resolveClaudeProfileHostId(executionOptionsRouting)
+    : (environmentHostId ??
+      executionOptionsRouting.hostId ??
+      selectPrimaryHost(
+        hostsQuery.data ?? [],
+        systemConfig.data?.primaryHostId ?? null,
+      )?.id ??
+      null);
+
+  const claudeAccounts = useClaudeAccounts({
+    hostId: claudeHostId,
+    projectId: claudeProjectId ?? preferenceProjectId ?? "",
+    enabled: enabled && rawSelectedProviderId === "claude-code",
+  });
+
+  const claudeProfileSelection =
+    claudeProfile ??
+    (claudeProfileChoice?.key === claudeAccounts.key
+      ? claudeProfileChoice.selection
+      : claudeAccounts.data?.defaultSelection);
+
+  const claudeProfileId =
+    rawSelectedProviderId === "claude-code" &&
+    claudeProfileSelection?.kind === "profile"
+      ? claudeProfileSelection.profileId
+      : undefined;
+
+  const profileModelsReady =
+    rawSelectedProviderId !== "claude-code" ||
+    claudeProfile !== undefined ||
+    (claudeAccounts.ready && !claudeAccounts.error);
+
+  const executionOptionsQuery = useSystemExecutionOptions({
+    enabled: executionOptionsQueryEnabled && profileModelsReady,
+    ...executionOptionsRouting,
+    providerId: executionOptionsProviderId,
+    claudeProfileId,
+  });
+
   const providers = executionOptionsQuery.data?.providers ?? EMPTY_PROVIDERS;
 
   const isLoadingModels =
@@ -1275,6 +1320,8 @@ export function useThreadCreationOptions(
   }, [scope, setRootComposeReuseValue]);
 
   return {
+    claudeAccounts,
+    claudeProfileSelection,
     executionOptionsRouting,
     selectedProviderId: effectiveProviderId,
     setSelectedProviderId,

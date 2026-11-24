@@ -291,6 +291,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     inheritedSkillsRootPaths: serverConfig.OMNYO_INHERITED_SKILLS_ROOTS,
     isDevelopment: !isProduction,
     performanceDiagnosticsAvailable: serverConfig.OMNYO_PERF_DIAGNOSTICS,
+    nativeClaudeProfilesOwnerPilotAvailable: true,
     serverPort: serverConfig.OMNYO_SERVER_PORT,
     sharedSkillRoots: { user: [], project: [] },
   };

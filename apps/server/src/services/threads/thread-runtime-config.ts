@@ -47,6 +47,7 @@ import { readWorkspaceAgentContext } from "./workspace-agent-context.js";
 import { resolveDeprecatedWorkspaceProvisionType } from "../environments/environment-response.js";
 import { markTurnTraceSpan } from "../system/turn-trace.js";
 import { resolveQuestionOwnerThread } from "./thread-parent.js";
+import { requireThreadClaudeProfile } from "../providers/claude-profiles.js";
 
 const UPDATE_ENVIRONMENT_DIRECTORY_INSTRUCTIONS =
   "If the user asks you to move this thread to another checkout, worktree, or directory, make sure the target directory exists, then call `update_environment_directory` with its absolute path. After it succeeds, stop work in the current turn; future turns will run in the updated environment.";
@@ -87,6 +88,7 @@ interface ResolvePermissionEscalationArgs {
 }
 
 export interface ResolvedThreadRuntimeCommandConfig {
+  claudeProfileBinding: { profileId: string } | null;
   contributedEnv: HostDaemonContributedEnvEntry[];
   dynamicTools: DynamicTool[];
   injectedSkillSources: HostDaemonInjectedSkillSource[];
@@ -164,6 +166,13 @@ export async function resolveThreadRuntimeCommandConfig(
   if (!host) {
     throw new ApiError(404, "host_not_found", "Host not found");
   }
+
+  const claudeProfileBinding = args.thread.claudeProfileBinding;
+  requireThreadClaudeProfile(deps, {
+    binding: claudeProfileBinding,
+    hostId: host.id,
+    providerId: args.thread.providerId,
+  });
 
   const workspaceIdentityPreparation = callHostRetryableOnlineRpc(deps, {
     hostId: args.environment.hostId,
@@ -246,15 +255,17 @@ export async function resolveThreadRuntimeCommandConfig(
       hostId: host.id,
       projectId: project.id,
     }),
-    resolvePluginProviderEnv({
-      providerId: args.thread.providerId,
-      context: {
-        purpose: "thread",
-        threadId: args.thread.id,
-        projectId: project.id,
-        hostId: host.id,
-      },
-    }),
+    claudeProfileBinding === null
+      ? resolvePluginProviderEnv({
+          providerId: args.thread.providerId,
+          context: {
+            purpose: "thread",
+            threadId: args.thread.id,
+            projectId: project.id,
+            hostId: host.id,
+          },
+        })
+      : Promise.resolve([]),
   ]).then(([hostEnvironment, providerEnvironment]) => {
     markTurnTraceSpan("runtimeConfig.env");
 
@@ -396,6 +407,10 @@ export async function resolveThreadRuntimeCommandConfig(
   markTurnTraceSpan("runtimeConfig.built");
 
   return {
+    claudeProfileBinding:
+      claudeProfileBinding === null
+        ? null
+        : { profileId: claudeProfileBinding.profileId },
     contributedEnv,
     dynamicTools,
     injectedSkillSources,

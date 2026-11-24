@@ -71,6 +71,7 @@ const STEP_REGION: Record<OnboardingStepId, StageRegion> = {
   chats: "sidebar",
   browser: "browser",
   plugins: "rail",
+  skills: "composer",
   automations: "automations",
   devices: "devices",
 };

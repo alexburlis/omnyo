@@ -31,6 +31,9 @@ Machine maintenance state is part of `omnyo machine list --json`; there is no
 separate machine lifecycle command. Keep the machine guide and omnyo-cli command
 index aligned with this surface.
 
+`omnyo machine rtk-status MACHINE --json` checks the agent PATH on the selected
+machine. It returns `{"installed":true}` when the executable is available.
+
 Local installed-daemon start, stop, and uninstall operations are flags on
 `install-machine.sh`, not `omnyo machine` subcommands. `install-machine.sh --adopt` installs the
 service for an already-enrolled data directory and backs
@@ -45,7 +48,6 @@ Modal connection and machine commands are documented in [modal-sandboxes](../plu
 Modal image debugging uses `omnyo modal image build`, `omnyo modal sandbox run`, `omnyo modal sandbox exec ID [--json] -- COMMAND...`, and `omnyo modal sandbox stop ID`. Debug compute expires after 30 minutes and skips Omnyo enrollment and project setup. See the plugin skill for output limits and typed RPC equivalents.
 
 The desktop `public-beta` build channel and its preparation limits are documented in [the public macOS app](../apps/desktop/README.md#public-macos-app). The channel is a build-time input, not a runtime setting.
-
 
 Portable workflow packages use the `omnyo automation workflow` command group; existing
 finite script runs remain under `omnyo workflows`. Review a local file with

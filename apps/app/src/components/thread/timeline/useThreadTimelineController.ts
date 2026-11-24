@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useQueryClient,
   type QueryObserverResult,
@@ -25,11 +18,8 @@ import {
   areTimelineHistorySnapshotsCompatible,
   readTimelineHistoryIdentity,
 } from "@omnyo/client-core";
-import {
-  getPendingSentMessages,
-  subscribePendingSentMessages,
-  withPendingSentMessages,
-} from "@/hooks/cache-owners/pending-sent-messages";
+import { withPendingSentMessages } from "@/hooks/cache-owners/pending-sent-messages";
+import { usePendingTimelineMessages } from "./usePendingTimelineMessages";
 import { hasThreadTimelineUnseenEvents } from "@/hooks/cache-owners/thread-timeline-unseen-events";
 import { clearThreadTimelineUnseenEvents } from "@/hooks/cache-owners/thread-timeline-unseen-events";
 import { useConnectionAwareQueryState } from "@/hooks/queries/connection-aware-query-state";
@@ -401,15 +391,7 @@ export function useThreadTimelineController({
 }: UseThreadTimelineControllerArgs): UseThreadTimelineControllerResult {
   const queryClient = useQueryClient();
 
-  const pendingSentMessages = useSyncExternalStore(
-    useCallback(
-      (listener: () => void) =>
-        subscribePendingSentMessages(queryClient, listener),
-      [queryClient],
-    ),
-    () => getPendingSentMessages(queryClient, threadId),
-  );
-
+  const pending = usePendingTimelineMessages(threadId);
   const isDocumentVisible = useDocumentVisible();
 
   const runtimeIdentityKey = useMemo(
@@ -1195,15 +1177,15 @@ export function useThreadTimelineController({
 
   const displayedTimelineRows = useMemo(
     () =>
-      displayedMaxSeq === undefined
+      confirmedNotFound
         ? timelineRows
         : withPendingSentMessages({
-            maxSeq: displayedMaxSeq,
-            pending: pendingSentMessages,
+            maxSeq: displayedMaxSeq ?? 0,
+            pending,
             rows: timelineRows,
             threadId,
           }),
-    [displayedMaxSeq, pendingSentMessages, threadId, timelineRows],
+    [confirmedNotFound, displayedMaxSeq, pending, threadId, timelineRows],
   );
 
   const hasDisplaySnapshot =

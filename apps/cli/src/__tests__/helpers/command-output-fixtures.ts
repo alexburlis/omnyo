@@ -115,6 +115,7 @@ export function makePendingSteerTimelineRow(): TimelineUserConversationRow {
 
 export function makeThread(overrides: MakeThreadArgs): Thread {
   return {
+    claudeProfileBinding: null,
     status: "idle",
     title: null,
     titleFallback: null,

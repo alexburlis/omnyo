@@ -7,6 +7,35 @@ editingNotes: Keep flags accurate against the CLI implementation.
 ---
 Provider commands
 
+Native Claude profiles are an opt-in pilot on the coordinator's local Mac.
+Enable the pilot with `omnyo provider claude-profile pilot enable`. The pilot
+currently requires Claude Code 2.1.331; other hosts or CLI versions report
+unavailable. Account Pooler presents the same profile management and sign-in
+controls.
+
+  omnyo provider claude-profile list [--machine ID] [--project ID] --json
+  omnyo provider claude-profile add LABEL [--adopt-existing] [--machine ID]
+  omnyo provider claude-profile login PROFILE_ID [--machine ID]
+  omnyo provider claude-profile login-status PROFILE_ID [--machine ID]
+  omnyo provider claude-profile login-cancel PROFILE_ID [--machine ID]
+  omnyo provider claude-profile status PROFILE_ID [--machine ID]
+  omnyo provider claude-profile default PROFILE_ID|unprofiled [--project ID]
+
+Sign-in stays in the installed Claude Code binary and opens Anthropic's browser
+page on the local Mac. Omnyo stores profile identity and readiness, not Claude
+credentials. A successful adoption becomes the machine default only when no
+machine default was saved. A project default overrides the machine default for
+new chats. Existing chats keep their profile and machine. Use
+`omnyo provider claude-profile pilot disable` to hide the controls without
+deleting profiles or chat bindings.
+
+A provider limit stops the chat on its pinned account. Omnyo never switches
+accounts or resends the prompt automatically.
+
+SDK: `providers.claudeProfiles.list`, `add`, `status`, `loginStart`, `loginGet`,
+`loginCancel`, `defaultsSet`, and `pilotSet`. Pass `hostId` to profile operations
+and `projectId` to list or defaultsSet when selecting a project default.
+
 Manage agents in Settings → Providers. Enabled providers can be reordered, made
 default or disabled through the row menu; disabled providers stay listed under
 Disabled with an Enable button. Install provider plugins in Settings → Plugins.

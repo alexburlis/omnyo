@@ -102,6 +102,7 @@ import {
   type OnboardingEntry,
 } from "./onboarding-telemetry";
 import { OnboardingIntro } from "./OnboardingIntro";
+import { RecommendedSkillsStep } from "./RecommendedSkillsStep";
 import {
   OnboardingStageContainer,
   type OnboardingProjectDraft,
@@ -1479,6 +1480,15 @@ export function OnboardingFlow({
         return (
           <PluginsStepContainer
             chrome={chrome}
+            onBack={goTo(-1)}
+            onContinue={advance("completed")}
+          />
+        );
+      case "skills":
+        return (
+          <RecommendedSkillsStep
+            chrome={chrome}
+            hostId={primaryHost?.status === "connected" ? hostId : null}
             onBack={goTo(-1)}
             onContinue={advance("completed")}
           />

@@ -18,6 +18,7 @@ import { threadOriginKindValues } from "@omnyo/domain/thread-origin-kind";
 import { threadVisibilityValues } from "@omnyo/domain/thread-visibility";
 import type {
   EnvironmentProviderSelection,
+  ClaudeProfileBinding,
   InboxConditionKind,
   InboxFailureState,
   InboxOwnerInputKind,
@@ -635,6 +636,9 @@ export const threads = sqliteTable(
       onDelete: "set null",
     }),
     providerId: text("provider_id").notNull(),
+    claudeProfileBinding: text("claude_profile_binding", {
+      mode: "json",
+    }).$type<ClaudeProfileBinding>(),
     modelOverride: text("model_override"),
     reasoningLevelOverride: text(
       "reasoning_level_override",

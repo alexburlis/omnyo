@@ -82,6 +82,7 @@ omnyo machine resume <id-or-name> Resume a machine (already active is a no-op)
 omnyo machine retry-cleanup <id-or-name> Retry failed teardown now
 omnyo machine remove <id-or-name> [--yes] Revoke and remove a machine
 omnyo machine provider-cli status <machine>
+omnyo machine rtk-status <machine>
 omnyo machine provider-cli install <machine> <provider-id>
 --action <install|update> [--yes]
 

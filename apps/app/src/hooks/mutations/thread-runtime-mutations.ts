@@ -232,8 +232,9 @@ export function useCreateThread() {
 
       if (
         outbox !== undefined &&
-        thread.originKind === null &&
-        thread.sourceThreadId === undefined &&
+        (thread.originKind === "handoff" ||
+          (thread.originKind === null &&
+            thread.sourceThreadId === undefined)) &&
         thread.pluginSubmission === undefined
       ) {
         const accepted = await createThreadThroughOutbox({

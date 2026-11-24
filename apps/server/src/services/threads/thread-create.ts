@@ -75,6 +75,7 @@ import {
   resolveCreateThreadEnvironment,
 } from "./thread-default-policy.js";
 import { assertValidParentThread } from "./thread-parent.js";
+import { resolveNewThreadClaudeProfile } from "../providers/claude-profiles.js";
 import {
   machineCameFromDefault,
   type ThreadCreateServiceRequestInput,
@@ -118,6 +119,7 @@ interface ResolveForkPointArgs {
 }
 
 interface ResolveCatalogExecutionDefaultsArgs {
+  claudeProfileId?: string;
   cwd?: string;
   executionDefaults: ProjectExecutionDefaults | null;
   hostId: string | null;
@@ -128,12 +130,20 @@ interface ResolveCatalogExecutionDefaultsArgs {
 
 async function loadCatalogDefaultForProvider(
   deps: ThreadCreateDeps,
-  args: { cwd?: string; hostId: string; providerId: string },
+  args: {
+    cwd?: string;
+    hostId: string;
+    providerId: string;
+    claudeProfileId?: string;
+  },
 ): Promise<ProjectExecutionDefaults | ApiError> {
   const catalog = await resolveSystemProviderModels(deps, {
     ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
     hostId: args.hostId,
     providerId: args.providerId,
+    ...(args.claudeProfileId === undefined
+      ? {}
+      : { claudeProfileId: args.claudeProfileId }),
   });
 
   if (catalog.modelLoadError !== null) {
@@ -167,6 +177,7 @@ async function loadCatalogDefaultForProvider(
 }
 
 interface ResolveSessionOptionExecutionDefaultsArgs {
+  claudeProfileId?: string;
   cwd?: string;
   executionDefaults: ProjectExecutionDefaults | null;
   hostId: string | null;
@@ -193,6 +204,9 @@ async function resolveSessionOptionExecutionDefaults(
     ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
     hostId: args.hostId,
     providerId: args.providerId,
+    ...(args.claudeProfileId === undefined
+      ? {}
+      : { claudeProfileId: args.claudeProfileId }),
   });
 
   if (catalog.modelLoadError !== null) {
@@ -249,7 +263,11 @@ export async function resolveCatalogExecutionDefaults(
     );
   }
 
-  const candidates = [args.providerId, ...args.providerFallbackCandidates];
+  const candidates =
+    args.claudeProfileId === undefined
+      ? [args.providerId, ...args.providerFallbackCandidates]
+      : [args.providerId];
+
   let lastError: ApiError | null = null;
 
   for (const providerId of candidates) {
@@ -257,6 +275,9 @@ export async function resolveCatalogExecutionDefaults(
       ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
       hostId: args.hostId,
       providerId,
+      ...(args.claudeProfileId === undefined
+        ? {}
+        : { claudeProfileId: args.claudeProfileId }),
     });
 
     if (!(result instanceof ApiError)) {
@@ -992,7 +1013,11 @@ export async function createThreadFromRequest(
     executionInputSources: requestInput.executionInputSources,
     model: requestInput.model,
     projectId: requestInput.projectId,
-    providerId: requestInput.providerId,
+    providerId:
+      requestInput.providerId ??
+      (requestInput.claudeProfile?.kind === "profile"
+        ? "claude-code"
+        : undefined),
   });
 
   const {
@@ -1098,7 +1123,34 @@ export async function createThreadFromRequest(
           )
         : undefined;
 
+  if (request.originKind === "fork" && sourceThread !== null) {
+    const sourceBinding = sourceThread.claudeProfileBinding;
+
+    if (
+      request.claudeProfile !== undefined &&
+      (request.claudeProfile.kind === "unprofiled"
+        ? sourceBinding !== null
+        : request.claudeProfile.profileId !== sourceBinding?.profileId)
+    )
+      throw new ApiError(
+        400,
+        "invalid_request",
+        "A native fork must keep its source Claude profile. Use a handoff to choose another account.",
+      );
+    request.claudeProfileBinding = sourceBinding;
+  } else {
+    request.claudeProfileBinding = await resolveNewThreadClaudeProfile(deps, {
+      providerId: request.providerId,
+      hostId: childHostId,
+      projectId: request.projectId,
+      selection: request.claudeProfile,
+    });
+  }
+
   const catalogExecutionDefaults = await resolveCatalogExecutionDefaults(deps, {
+    ...(request.claudeProfileBinding == null
+      ? {}
+      : { claudeProfileId: request.claudeProfileBinding.profileId }),
     ...(modelCatalogCwd !== undefined ? { cwd: modelCatalogCwd } : {}),
     executionDefaults,
     hostId: childHostId,
@@ -1117,6 +1169,9 @@ export async function createThreadFromRequest(
   const resolvedExecutionDefaults = await resolveSessionOptionExecutionDefaults(
     deps,
     {
+      ...(request.claudeProfileBinding == null
+        ? {}
+        : { claudeProfileId: request.claudeProfileBinding.profileId }),
       ...(modelCatalogCwd !== undefined ? { cwd: modelCatalogCwd } : {}),
       executionDefaults: catalogExecutionDefaults,
       hostId: childHostId,

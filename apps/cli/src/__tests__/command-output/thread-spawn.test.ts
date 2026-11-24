@@ -30,6 +30,47 @@ describe("omnyo thread spawn command output", () => {
     return vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   }
 
+  it.each([
+    [
+      "00000000-0000-4000-8000-000000000001",
+      { kind: "profile", profileId: "00000000-0000-4000-8000-000000000001" },
+      "claude-code",
+    ],
+    ["unprofiled", { kind: "unprofiled" }, undefined],
+  ])(
+    "passes explicit Claude selection %s without changing another provider default",
+    async (flag, selection, providerId) => {
+      const post = vi.fn(async ({ json }: { json: unknown }) => {
+        const request = createThreadRequestSchema.parse(json);
+        expect(request.claudeProfile).toEqual(selection);
+        expect(request.providerId).toBe(providerId);
+
+        return fixtures.makeThread({
+          id: "profile-thread",
+          projectId: "proj-1",
+          providerId: request.providerId ?? "codex",
+        });
+      });
+
+      stubServerApi({ "v1.threads.$post": post });
+      await runCommand(
+        [
+          "thread",
+          "spawn",
+          "--project",
+          "proj-1",
+          "--prompt",
+          "hello",
+          "--claude-profile",
+          flag,
+          "--json",
+        ],
+        register,
+      );
+      expect(post).toHaveBeenCalledOnce();
+    },
+  );
+
   it("rejects explicitly empty lifecycle ownership instead of creating an independent thread", async () => {
     const post = vi.fn(async ({ json }: { json: unknown }) => {
       createThreadRequestSchema.parse(json);

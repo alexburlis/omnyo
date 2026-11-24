@@ -17,6 +17,7 @@ import type {
   ThreadQueuedWork,
   ThreadRuntimeDisplayStatus,
   ThreadStatus,
+  ClaudeProfileSelection,
   WorkspaceGitOperation,
 } from "@omnyo/domain";
 import type {
@@ -3908,6 +3909,7 @@ export interface NewThreadRequest {
    */
   projectId: string;
   providerId: string;
+  claudeProfile?: ClaudeProfileSelection;
   model: string;
   reasoningLevel: ReasoningLevel;
   permissionMode: PermissionMode;

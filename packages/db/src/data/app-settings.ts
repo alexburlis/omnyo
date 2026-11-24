@@ -14,6 +14,8 @@ import {
   type AiTask,
   type AppKeybindingOverrides,
   type AppSettings,
+  claudeProfileSelectionSchema,
+  type ClaudeProfileSelection,
 } from "@omnyo/domain";
 import {
   prepareCachedQuery,
@@ -35,6 +37,72 @@ const PLUGIN_SAFE_MODE_KEY = "pluginSafeMode";
 const DISABLED_PROVIDER_IDS_KEY = "disabledProviderIds";
 
 const LEGACY_DIAGNOSTIC_EVENTS_KEY = "showUnhandledProviderEvents";
+
+const NATIVE_CLAUDE_PROFILES_PILOT_KEY = "nativeClaudeProfilesOwnerPilot";
+
+function claudeProfileDefaultKey(
+  hostId: string,
+  projectId: string | null,
+): string {
+  return `nativeClaudeProfileDefault:${JSON.stringify([hostId, projectId])}`;
+}
+
+export function getNativeClaudeProfilesOwnerPilot(db: DbConnection): boolean {
+  const row = db
+    .select({ value: appSettingsValues.value })
+    .from(appSettingsValues)
+    .where(eq(appSettingsValues.key, NATIVE_CLAUDE_PROFILES_PILOT_KEY))
+    .get();
+
+  return row !== undefined && parseStoredValue(row.value) === true;
+}
+
+export function setNativeClaudeProfilesOwnerPilot(
+  db: DbConnection,
+  enabled: boolean,
+): void {
+  writeValue(db, NATIVE_CLAUDE_PROFILES_PILOT_KEY, enabled, Date.now());
+}
+
+export function getNativeClaudeProfileDefault(
+  db: DbConnection,
+  args: { hostId: string; projectId: string | null },
+): ClaudeProfileSelection | null {
+  const row = db
+    .select({ value: appSettingsValues.value })
+    .from(appSettingsValues)
+    .where(
+      eq(
+        appSettingsValues.key,
+        claudeProfileDefaultKey(args.hostId, args.projectId),
+      ),
+    )
+    .get();
+
+  if (row === undefined) return null;
+
+  const parsed = claudeProfileSelectionSchema.safeParse(
+    parseStoredValue(row.value),
+  );
+
+  return parsed.success ? parsed.data : null;
+}
+
+export function setNativeClaudeProfileDefault(
+  db: DbConnection,
+  args: {
+    hostId: string;
+    projectId: string | null;
+    selection: ClaudeProfileSelection;
+  },
+): void {
+  writeValue(
+    db,
+    claudeProfileDefaultKey(args.hostId, args.projectId),
+    args.selection,
+    Date.now(),
+  );
+}
 
 function parseStoredValue(text: string): unknown {
   try {

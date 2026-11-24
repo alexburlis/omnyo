@@ -25,6 +25,7 @@ import {
   writeCachedProviderList,
 } from "@/lib/provider-list-cache";
 import { makeProviderInfo } from "@omnyo/test-helpers/domain-fixtures";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import {
   modelCatalogCacheKey,
   readCachedModelCatalog,
@@ -38,6 +39,7 @@ const PROJECT_PROVIDER_ID = "project-provider";
 
 vi.mock("@/lib/sdk", () => ({
   sdk: {
+    providers: { claudeProfiles: { list: vi.fn() } },
     system: {
       executionOptions: vi.fn(),
       providerStates: vi.fn(),
@@ -327,6 +329,12 @@ function setProjectScopedValue(baseKey: string, value: string): void {
 }
 
 beforeEach(() => {
+  vi.mocked(sdk.providers.claudeProfiles.list).mockResolvedValue({
+    action: "list",
+    supported: false,
+    profiles: [],
+    defaultSelection: { kind: "unprofiled" },
+  });
   window.sessionStorage.clear();
   vi.mocked(sdk.system.executionOptions).mockResolvedValue(
     executionOptionsResponse(),
@@ -341,6 +349,59 @@ afterEach(() => {
 });
 
 describe("useThreadCreationOptions", () => {
+  it("waits for native account resolution before loading Claude models", async () => {
+    const pending =
+      createDeferredPromise<
+        Awaited<ReturnType<typeof sdk.providers.claudeProfiles.list>>
+      >();
+
+    vi.mocked(sdk.providers.claudeProfiles.list).mockReturnValue(
+      pending.promise,
+    );
+    vi.mocked(sdk.system.executionOptions).mockResolvedValue(
+      claudeExecutionOptionsResponse(),
+    );
+    const { wrapper } = createQueryClientTestHarness();
+    const profileId = "11111111-1111-4111-8111-111111111111";
+    renderHook(
+      () =>
+        useThreadCreationOptions({
+          ...claudeThreadCreationArgs("profile-thread", "claude-opus-4-8[1m]"),
+          environmentHostId: "host-native",
+          claudeProjectId: PROJECT_ID,
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() =>
+      expect(sdk.providers.claudeProfiles.list).toHaveBeenCalled(),
+    );
+    expect(sdk.system.executionOptions).not.toHaveBeenCalled();
+    await act(async () =>
+      pending.resolve({
+        action: "list",
+        supported: true,
+        profiles: [
+          {
+            id: profileId,
+            label: "Personal",
+            status: "ready",
+            loginExpiresAt: null,
+          },
+        ],
+        defaultSelection: { kind: "profile", profileId },
+      }),
+    );
+    await waitFor(() =>
+      expect(sdk.system.executionOptions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerId: "claude-code",
+          claudeProfileId: profileId,
+        }),
+      ),
+    );
+  });
+
   it("shows each new model's approval default and keeps explicit choices local to that model", async () => {
     const { wrapper, queryClient } = createQueryClientTestHarness();
     queryClient.setQueryData(systemConfigQueryKey(), {

@@ -63,6 +63,7 @@ import {
 } from "./query-policies";
 
 interface UseSystemExecutionOptionsArgs {
+  claudeProfileId?: string;
   enabled?: boolean;
   environmentId?: string;
   hostId?: string;
@@ -70,6 +71,7 @@ interface UseSystemExecutionOptionsArgs {
 }
 
 interface SystemExecutionOptionsQueryArgs {
+  claudeProfileId?: string;
   environmentId: string | null;
   hostId: string | null;
   providerId: string | null;
@@ -351,6 +353,7 @@ export function useSystemProviderInfo({
 }
 
 async function requestOfferedProviderExecutionOptions({
+  claudeProfileId,
   environmentId,
   hostId,
   providerId,
@@ -366,6 +369,7 @@ async function requestOfferedProviderExecutionOptions({
       environmentId: environmentId ?? undefined,
       hostId: hostId ?? undefined,
       providerId: requestedProviderId ?? undefined,
+      ...(claudeProfileId === undefined ? {} : { claudeProfileId }),
       signal,
     });
 
@@ -373,6 +377,7 @@ async function requestOfferedProviderExecutionOptions({
   const fallbackProviderId = response.providers[0]?.id;
 
   if (
+    claudeProfileId !== undefined ||
     providerId === null ||
     fallbackProviderId === undefined ||
     response.providers.some((provider) => provider.id === providerId)
@@ -387,6 +392,7 @@ async function requestOfferedProviderExecutionOptions({
 }
 
 export function systemExecutionOptionsQueryOptions({
+  claudeProfileId,
   environmentId,
   hostId,
   providerId,
@@ -394,6 +400,7 @@ export function systemExecutionOptionsQueryOptions({
 }: SystemExecutionOptionsQueryArgs) {
   return queryOptions<SystemExecutionOptionsResponse>({
     queryKey: systemExecutionOptionsQueryKey({
+      claudeProfileId,
       environmentId,
       hostId,
       providerId,
@@ -401,6 +408,7 @@ export function systemExecutionOptionsQueryOptions({
     queryFn: async ({ signal }) => {
       const { response, loadedProviderId } =
         await requestOfferedProviderExecutionOptions({
+          claudeProfileId,
           environmentId,
           hostId,
           providerId,
@@ -410,7 +418,7 @@ export function systemExecutionOptionsQueryOptions({
       const modelsProviderId =
         loadedProviderId ?? response.providers[0]?.id ?? null;
 
-      if (writeLastKnown) {
+      if (writeLastKnown && claudeProfileId === undefined) {
         writeCachedProviderList(
           providerListCacheKey({ environmentId, hostId }),
           response.providers,
@@ -446,6 +454,7 @@ export function systemExecutionOptionsQueryOptions({
 
       if (
         writeLastKnown &&
+        claudeProfileId === undefined &&
         response.modelLoadError?.providerId === modelsProviderId &&
         response.models.length === 0 &&
         response.selectedOnlyModels.length === 0 &&
@@ -499,6 +508,7 @@ export function useSystemExecutionOptions(
   const environmentId = args.environmentId ?? null;
   const hostId = args.hostId ?? null;
   const providerId = args.providerId ?? null;
+  const claudeProfileId = args.claudeProfileId;
   const enabled = args.enabled ?? true;
   useSystemRealtimeSubscription({ enabled });
   useHostListRealtimeSubscription({ enabled });
@@ -512,6 +522,7 @@ export function useSystemExecutionOptions(
 
   return useQuery({
     ...systemExecutionOptionsQueryOptions({
+      claudeProfileId,
       environmentId,
       hostId,
       providerId,
@@ -519,15 +530,17 @@ export function useSystemExecutionOptions(
     }),
     enabled,
     placeholderData: (previousData, previousQuery) =>
-      resolveExecutionOptionsPlaceholder({
-        previousData,
-        previousQueryKey: previousQuery?.queryKey,
-        environmentId,
-        hostId,
-        providerId,
-        catalogCacheKey,
-        providersCacheKey,
-      }),
+      claudeProfileId === undefined
+        ? resolveExecutionOptionsPlaceholder({
+            previousData,
+            previousQueryKey: previousQuery?.queryKey,
+            environmentId,
+            hostId,
+            providerId,
+            catalogCacheKey,
+            providersCacheKey,
+          })
+        : undefined,
   });
 }
 

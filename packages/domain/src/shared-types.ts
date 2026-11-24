@@ -120,7 +120,12 @@ const promptInputVisibilityValues = ["agent-only"] as const;
 
 const promptInputVisibilitySchema = z.enum(promptInputVisibilityValues);
 
-const promptInputVisibilityFields = {
+export const submissionIdSchema = z
+  .string()
+  .regex(/^sub_[0-9a-f]{32}$/u, "submissionId must be sub_ plus 32 hex digits");
+
+const promptInputMetadataFields = {
+  submissionId: submissionIdSchema.optional(),
   visibility: promptInputVisibilitySchema.optional(),
 };
 
@@ -247,19 +252,19 @@ export const promptInputSchema = z.discriminatedUnion("type", [
     type: z.literal("text"),
     text: z.string(),
     mentions: z.array(promptTextMentionSchema).default([]),
-    ...promptInputVisibilityFields,
+    ...promptInputMetadataFields,
   }),
   z.object({
     type: z.literal("image"),
     url: z.string().url(),
-    ...promptInputVisibilityFields,
+    ...promptInputMetadataFields,
   }),
   z.object({
     type: z.literal("localImage"),
     path: z.string(),
     sourceProjectId: z.string().min(1).optional(),
     hostId: z.string().min(1).optional(),
-    ...promptInputVisibilityFields,
+    ...promptInputMetadataFields,
   }),
   z.object({
     type: z.literal("localFile"),
@@ -269,7 +274,7 @@ export const promptInputSchema = z.discriminatedUnion("type", [
     name: z.string().optional(),
     sizeBytes: z.number().int().nonnegative().optional(),
     mimeType: z.string().optional(),
-    ...promptInputVisibilityFields,
+    ...promptInputMetadataFields,
   }),
 ]);
 

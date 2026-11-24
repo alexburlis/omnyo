@@ -192,8 +192,22 @@ describe("user message parsing", () => {
       text: "First\n\nSecond",
       input: [{ type: "text", text: "First\n\nSecond", mentions: [] }],
       inputGroups: [
-        [{ type: "text", text: "First", mentions: [] }],
-        [{ type: "text", text: "Second", mentions: [] }],
+        [
+          {
+            type: "text",
+            text: "First",
+            mentions: [],
+            submissionId: "sub_11111111111111111111111111111111",
+          },
+        ],
+        [
+          {
+            type: "text",
+            text: "Second",
+            mentions: [],
+            submissionId: "sub_22222222222222222222222222222222",
+          },
+        ],
       ],
     });
 
@@ -220,12 +234,14 @@ describe("user message parsing", () => {
     expect(messages.map((message) => message.turnRequest)).toEqual([
       {
         clientRequestId: event.requestId,
+        submissionId: "sub_11111111111111111111111111111111",
         isGrouped: true,
         kind: "message",
         status: "pending",
       },
       {
         clientRequestId: event.requestId,
+        submissionId: "sub_22222222222222222222222222222222",
         isGrouped: true,
         kind: "message",
         status: "pending",

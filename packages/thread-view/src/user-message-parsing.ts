@@ -331,6 +331,7 @@ function buildClientUserMessage({
       ? acceptedClientRequest.meta
       : meta;
 
+  const submissionId = input.find((part) => part.submissionId)?.submissionId;
   const agentEnvelope = parseAgentMessageEnvelope(parsedInput.text);
 
   const initiator =
@@ -365,7 +366,7 @@ function buildClientUserMessage({
     systemMessageKind: decoded.systemMessageKind ?? "unlabeled",
     systemMessageSubject: decoded.systemMessageSubject ?? null,
     ...(decoded.maintenance ? { maintenance: decoded.maintenance } : {}),
-    turnRequest,
+    turnRequest: submissionId ? { ...turnRequest, submissionId } : turnRequest,
     text: parsedInput.text,
     mentions: parsedInput.mentions,
     attachments: buildAttachments(parsedInput),

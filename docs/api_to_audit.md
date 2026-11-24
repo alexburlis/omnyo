@@ -1,5 +1,18 @@
 # APIs To Audit
 
+## Native Claude profile owner pilot
+
+The existing `experimental_NewThreadComposer` includes `claudeProfile` in its
+`NewThreadRequest`. Plugins forward this selection unchanged to
+`api.sdk.threads.spawn`; core and plugin composers use the same server binding
+path. `api.sdk.providers.claudeProfiles` exposes profile management and defaults
+through the same coordinator endpoint used by Account Pooler. The feature is
+an explicit opt-in pilot on a supported coordinator host. It sends opaque profile IDs and safe
+status metadata; the host owns native credentials and directory resolution.
+Stabilization requires mixed-daemon rejection, immutable resume bindings,
+duplicate handoff reconciliation, native expiry isolation, and supported
+authentication-policy evidence before a broader rollout.
+
 ## Plugin manifest V1 import
 
 `experimental_pluginPackageJsonSchemaV1` is the exact shared

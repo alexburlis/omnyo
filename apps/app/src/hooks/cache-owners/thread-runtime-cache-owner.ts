@@ -23,13 +23,12 @@ import type {
   ThreadSearchResponse,
   ThreadTimelineResponse,
   SystemAppUpdateStatus,
-  TimelineConversationAttachments,
   TimelineRow,
   TimelineUserConversationRow,
   UpdateQueuedMessageRequest,
 } from "@omnyo/server-contract";
 import type { AppCreateThreadRequest } from "@omnyo/client-core";
-import { collectPromptAttachments } from "@/lib/prompt-attachments";
+import { buildOptimisticUserMessageRow } from "./optimistic-user-message";
 import {
   confirmPendingQueuedMessageRemoval,
   mergePendingComposerQueuedMessages,
@@ -261,27 +260,11 @@ interface BuildAcceptedPromptHistoryEntryArgs {
   input: PromptHistoryEntry["input"];
 }
 
-interface BuildOptimisticUserMessageRowParams {
-  createdAt: number;
-  clientRequestId: ClientTurnRequestId | null;
-  input: SendThreadMessageMutationRequest["input"];
-  mode: SendThreadMessageMutationRequest["mode"];
-  threadId: string;
-  threadStatus: ThreadWithRuntime["status"] | null;
-}
-
 interface BuildOptimisticQueuedMessageParams {
   createdAt: number;
   queryClient: QueryClient;
   request: CreateQueuedMessageRequestWithThreadId & { sendAt?: number };
   waitingOn?: NonNullable<ThreadQueuedMessage["waitingOn"]>;
-}
-
-type OptimisticTurnRequestKind = "message" | "steer";
-
-interface OptimisticTurnRequestKindArgs {
-  mode: SendThreadMessageMutationRequest["mode"];
-  threadStatus: ThreadWithRuntime["status"] | null;
 }
 
 interface SendThreadMessageAcceptedTurnTransaction {
@@ -982,21 +965,6 @@ function hasUnmanagedCheckoutIntent(request: AppCreateThreadRequest): boolean {
   );
 }
 
-function optimisticTurnRequestKind({
-  mode,
-  threadStatus,
-}: OptimisticTurnRequestKindArgs): OptimisticTurnRequestKind {
-  if (mode === "steer" || mode === "steer-if-active") {
-    return "steer";
-  }
-
-  if (mode === "auto" && threadStatus === "active") {
-    return "steer";
-  }
-
-  return "message";
-}
-
 export function predictCachedThreadSendWait(
   queryClient: QueryClient,
   request: Pick<SendThreadMessageMutationRequest, "id" | "mode" | "sendAt">,
@@ -1087,66 +1055,6 @@ function optimisticSendWait(
   if (sendNow) return undefined;
 
   return readCachedThreadDispatchWait({ queryClient, threadId: request.id });
-}
-
-function buildOptimisticUserMessageRow({
-  clientRequestId,
-  createdAt,
-  input,
-  mode,
-  threadId,
-  threadStatus,
-}: BuildOptimisticUserMessageRowParams): TimelineUserConversationRow {
-  const id = `optimistic-user-${nanoid()}`;
-
-  const text = input
-    .filter(
-      (entry): entry is Extract<typeof entry, { type: "text" }> =>
-        entry.type === "text" && entry.visibility !== "agent-only",
-    )
-    .map((entry) => entry.text)
-    .join("\n\n");
-
-  const attachments = collectPromptAttachments(input);
-
-  const timelineAttachments: TimelineConversationAttachments | null =
-    attachments
-      ? {
-          webImages: attachments.webImages,
-          localImages: attachments.localImages,
-          localFiles: attachments.localFiles,
-          imageUrls: attachments.imageUrls ?? [],
-          localImagePaths: attachments.localImagePaths ?? [],
-          localFilePaths: attachments.localFilePaths ?? [],
-          localFileDetails: attachments.localFileDetails ?? [],
-        }
-      : null;
-
-  return {
-    id,
-    kind: "conversation",
-    role: "user",
-    threadId,
-    turnId: null,
-    messageSeq: 0,
-    sourceSeqStart: 0,
-    sourceSeqEnd: 0,
-    startedAt: createdAt,
-    createdAt,
-    text,
-    mentions: [],
-    attachments: timelineAttachments,
-    initiator: "user",
-    senderThreadId: null,
-    systemMessageKind: "unlabeled",
-    systemMessageSubject: null,
-    turnRequest: {
-      clientRequestId,
-      isGrouped: false,
-      kind: optimisticTurnRequestKind({ mode, threadStatus }),
-      status: "pending",
-    },
-  };
 }
 
 function applyOptimisticAcceptedTurnThreadState({

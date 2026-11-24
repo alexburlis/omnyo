@@ -157,6 +157,15 @@ readiness. The default waits for a complete refresh.
 - `omnyo provider enable`
 - `omnyo provider disable`
 - `omnyo provider models`
+- `omnyo provider claude-profile`
+- `omnyo provider claude-profile list`
+- `omnyo provider claude-profile add`
+- `omnyo provider claude-profile status`
+- `omnyo provider claude-profile login`
+- `omnyo provider claude-profile login-status`
+- `omnyo provider claude-profile login-cancel`
+- `omnyo provider claude-profile default`
+- `omnyo provider claude-profile pilot`
 
 ## machine
 
@@ -184,6 +193,7 @@ readiness. The default waits for a complete refresh.
 - `omnyo machine retry-update`
 - `omnyo machine provider-cli`
 - `omnyo machine provider-cli status`
+- `omnyo machine rtk-status <machine>` checks the machine's agent PATH.
 - `omnyo machine provider-cli install`
 
 `omnyo thread spawn --new-machine <provider-id>` creates a machine for a new

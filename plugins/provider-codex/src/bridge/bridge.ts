@@ -3580,17 +3580,21 @@ async function handleRequest(
         !session.codexThreadId
       )
         throw new Error("No live Codex session is available");
+      const codexThreadId = session.codexThreadId;
       const serviceTier = toCodexServiceTier(request.params.serviceTier);
       await session.connection.request({
         method: "thread/settings/update",
-        params: { threadId: session.codexThreadId, serviceTier },
+        params: { threadId: codexThreadId, serviceTier },
         resultSchema: ignoredChildResultSchema,
       });
 
       for (const turnId of session.openCodexTurnIds) {
+        if (session.codexThreadIdsByTurnId.get(turnId) !== codexThreadId)
+          continue;
+
         const result = await session.connection.request({
           method: "turn/settings/update",
-          params: { threadId: session.codexThreadId, turnId, serviceTier },
+          params: { threadId: codexThreadId, turnId, serviceTier },
           resultSchema: z.object({
             status: z.enum(["applied", "targetUnavailable"]),
           }),

@@ -1,4 +1,5 @@
 import type {
+  ClaudeProfileSelection,
   PermissionMode,
   ReasoningLevel,
   ServiceTier,
@@ -34,6 +35,13 @@ export type ScopedExecutionInputSources =
   | ExistingThreadExecutionInputSources;
 
 export interface UsePromptModelReasoningOptions {
+  claudeProfile?: ClaudeProfileSelection;
+  claudeProfileChoice?: {
+    key: string;
+    selection: ClaudeProfileSelection;
+  } | null;
+  claudeProjectId?: string;
+  resolveClaudeProfileHostId?: (routing: SystemProvidersQuery) => string | null;
   enabled?: boolean;
   environmentId?: string;
   environmentHostId?: string;

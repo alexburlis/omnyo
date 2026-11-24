@@ -21,6 +21,7 @@ import {
 } from "drizzle-orm";
 import type {
   JsonObject,
+  ClaudeProfileBinding,
   ReasoningLevel,
   ThreadChangeKind,
   ThreadLifecycleEvent,
@@ -366,6 +367,7 @@ export interface CreateThreadInput {
   projectId: string;
   environmentId?: string | null;
   providerId: string;
+  claudeProfileBinding?: ClaudeProfileBinding | null;
   title?: string | null;
   titleFallback?: string | null;
   sectionId?: string | null;
@@ -447,6 +449,7 @@ export function createThread(
           projectId: input.projectId,
           environmentId: input.environmentId ?? null,
           providerId: input.providerId,
+          claudeProfileBinding: input.claudeProfileBinding ?? null,
           title: input.title ?? null,
           titleFallback: input.titleFallback ?? null,
           sectionId: input.sectionId ?? null,
