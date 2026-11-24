@@ -1,6 +1,7 @@
 import type { PluginApi } from "@omnyo/plugin-sdk";
 import { toolInputSchema } from "./contracts.js";
 import { TOOL_DESCRIPTION } from "./tool-definition.js";
+import { defineNeedsYouSettings } from "./sidebar/settings-contract.js";
 import {
   validateToolInput,
   buildInteractionPayload,
@@ -9,7 +10,8 @@ import {
 
 export const TOOL_NAME = "AskUserQuestion";
 
-export default function plugin(api: PluginApi) {
+export default async function plugin(api: PluginApi) {
+  defineNeedsYouSettings(api);
   api.agents.registerTool({
     name: TOOL_NAME,
     description: `${TOOL_DESCRIPTION}\nQuestions use Omnyo's native question panel. In a chat that another chat started or parents, the question goes to that chat instead of the owner, and its answer arrives as a message in this chat. This call returns immediately. Answers steer the running turn or resume an idle chat. A required question blocks only the dependent action; keep doing independent authorized work. Optional questions permit a reversible default. Withdraw unanswered questions that are no longer needed with omnyo question command --self using the returned id and revision. Dismissal supplies no answer or approval. Set delegable on a question only when it is a reversible choice within authority you already hold, so a rule the owner adopted may answer it; never when it asks the owner to approve pushing, publishing, deploying, releasing, submitting, sending, purchasing, deleting data, changing an external service, creating an account, or saving anything that outlives the chat.`,
@@ -105,4 +107,6 @@ export default function plugin(api: PluginApi) {
         : [TOOL_NAME],
     skills: [],
   }));
+
+  await api.sdk.experimental_attention.adopt({ pluginId: "needs-you" });
 }

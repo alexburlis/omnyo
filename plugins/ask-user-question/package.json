@@ -1,9 +1,9 @@
 {
   "name": "omnyo-plugin-ask-user-question",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Let any provider ask the user a multiple-choice question, the way Claude Code's AskUserQuestion does natively.",
+  "description": "Questions, attention highlights and callback relationships, using Omnyo’s native thread state.",
   "author": {
     "name": "Omnyo",
     "url": "https://omnyohq.com"
@@ -14,12 +14,12 @@
     "directory": "plugins/ask-user-question"
   },
   "engines": {
-    "omnyo": ">=0.0",
-    "omnyoPluginSdk": ">=0.6.30 >=0.6.44"
+    "omnyo": ">=0.46.83",
+    "omnyoPluginSdk": ">=0.6.45"
   },
   "omnyo": {
-    "name": "Ask User Question",
-    "description": "Let any provider ask the user a multiple-choice question, the way Claude Code's AskUserQuestion does natively.",
+    "name": "Needs You",
+    "description": "Questions, attention highlights and callback relationships, using Omnyo’s native thread state.",
     "branding": {
       "icon": "MessageQuestion"
     },

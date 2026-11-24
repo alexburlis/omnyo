@@ -138,6 +138,7 @@ describe("plugin catalog service", () => {
     bundledPlugins?: Parameters<
       typeof createPluginCatalogService
     >[0]["bundledPlugins"];
+    consolidatedInto?: (id: string) => string | undefined;
     fetch?: MarketplaceFetch;
     warn?: (message: string) => void;
   }) {
@@ -161,6 +162,9 @@ describe("plugin catalog service", () => {
       },
       bundledPlugins:
         options?.bundledPlugins ?? listBundledPluginRegistrations(),
+      ...(options?.consolidatedInto === undefined
+        ? {}
+        : { consolidatedInto: options.consolidatedInto }),
       ...(options?.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options?.warn === undefined ? {} : { warn: options.warn }),
     });
@@ -325,6 +329,25 @@ describe("plugin catalog service", () => {
       (await catalog.search("sidebar")).map((entry) => entry.entryId),
     ).toContain("thread-hover-cards");
     expect(await catalog.search("no-such-plugin")).toEqual([]);
+  });
+
+  it("shows the upstream listing only while it still owns the feature", async () => {
+    let owner: string | undefined;
+
+    const catalog = service({
+      consolidatedInto: (id) => (id === "inline-vis" ? owner : undefined),
+    });
+
+    expect(
+      (await catalog.search("inline-vis")).map((entry) => entry.pluginId),
+    ).toContain("inline-vis");
+    owner = "inline-ui";
+    expect(
+      (await catalog.search("inline-vis")).map((entry) => entry.pluginId),
+    ).not.toContain("inline-vis");
+    expect(
+      (await catalog.search("docs")).map((entry) => entry.pluginId),
+    ).toContain("simple-notes");
   });
 
   it("reflects install and remove in the installed flag", async () => {

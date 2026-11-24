@@ -9,9 +9,13 @@ import plugin, { TOOL_NAME } from "./server.js";
 import { TOO_FEW_OPTIONS_MESSAGE } from "./tool-definition.js";
 import { toolInputSchema } from "./contracts.js";
 
-function createHost(): FakePluginHost {
+async function createHost(): Promise<FakePluginHost> {
   const host = createFakePluginHost({ pluginId: "ask-user-question" });
-  plugin(host.api as unknown as Parameters<typeof plugin>[0]);
+  host.harness.sdk.stub("experimental_attention.adopt", () => ({
+    ok: true,
+    imported: false,
+  }));
+  await plugin(host.api as unknown as Parameters<typeof plugin>[0]);
 
   return host;
 }
@@ -59,7 +63,7 @@ describe("provider gating", () => {
   it.each(["some-plugin-provider"])(
     "withholds the tool from %s, which declares it natively",
     async (providerId) => {
-      const host = createHost();
+      const host = await createHost();
 
       const resolved = await host.harness.resolveAgentConfiguration(
         configurationContext(providerId, true),
@@ -72,7 +76,7 @@ describe("provider gating", () => {
   it.each(["codex", "claude-code", "pi", "acp-cursor"])(
     "registers the tool for %s with the schema generated from its input parser",
     async (providerId) => {
-      const host = createHost();
+      const host = await createHost();
 
       const resolved = await host.harness.resolveAgentConfiguration(
         configurationContext(providerId),
@@ -104,7 +108,7 @@ describe("provider gating", () => {
   ] as const)(
     "offers the tool to a hidden $kind only when its questions reach a parent chat",
     async ({ parentThreadId, originKind, offered }) => {
-      const host = createHost();
+      const host = await createHost();
 
       const resolved = await host.harness.resolveAgentConfiguration(
         makePluginAgentConfigurationContext({
@@ -124,7 +128,7 @@ describe("provider gating", () => {
   );
 
   it("offers the tool to child chats so their questions reach the parent chat", async () => {
-    const host = createHost();
+    const host = await createHost();
 
     const resolved = await host.harness.resolveAgentConfiguration(
       makePluginAgentConfigurationContext({
@@ -142,7 +146,7 @@ describe("provider gating", () => {
   it.each(["codex", "pi", "acp-cursor"])(
     "does not prescribe provider-specific plan tools to %s",
     async (providerId) => {
-      const host = createHost();
+      const host = await createHost();
 
       const resolved = await host.harness.resolveAgentConfiguration(
         configurationContext(providerId),
@@ -156,7 +160,7 @@ describe("provider gating", () => {
   );
 
   it("advertises multiSelect as optional and defaults it during execution", async () => {
-    const host = createHost();
+    const host = await createHost();
 
     const resolved = await host.harness.resolveAgentConfiguration(
       configurationContext("codex"),
@@ -239,7 +243,7 @@ describe("asking a question", () => {
       },
     ],
   ])("rejects unknown fields on the %s object", async (_level, input) => {
-    const host = createHost();
+    const host = await createHost();
     await expect(host.harness.callAgentTool(TOOL_NAME, input)).rejects.toThrow(
       'Unrecognized key: "extra"',
     );
@@ -249,7 +253,7 @@ describe("asking a question", () => {
   it.each([0, 1])(
     "rejects %i options with guidance to proceed before opening an interaction",
     async (optionCount) => {
-      const host = createHost();
+      const host = await createHost();
       await expect(
         host.harness.callAgentTool(TOOL_NAME, {
           questions: [
@@ -267,7 +271,7 @@ describe("asking a question", () => {
   it.each(["required", "optional"])(
     "opens %s native questions asynchronously without a second plugin form",
     async (mode) => {
-      const host = createHost();
+      const host = await createHost();
       host.harness.sdk.stub("experimental_attention.command", () => ({
         questions: [],
         callbacks: [],
@@ -304,7 +308,7 @@ describe("asking a question", () => {
   it.each(["required", "optional"])(
     "tells a routed chat that its %s question went to the chat it reports to, not the owner",
     async (mode) => {
-      const host = createHost();
+      const host = await createHost();
       host.harness.sdk.stub("experimental_attention.command", () => ({
         questions: [],
         callbacks: [],
@@ -340,7 +344,7 @@ describe("asking a question", () => {
   ])(
     "maps delegable %s to an open command marked %s",
     async (delegable, expected) => {
-      const host = createHost();
+      const host = await createHost();
       host.harness.sdk.stub("experimental_attention.command", () => ({
         questions: [],
         callbacks: [],
@@ -362,7 +366,7 @@ describe("asking a question", () => {
   );
 
   it("surfaces a native service failure instead of claiming a question was shown", async () => {
-    const host = createHost();
+    const host = await createHost();
     host.harness.sdk.stub("experimental_attention.command", () => {
       throw new Error("Native question service unavailable");
     });
@@ -373,7 +377,7 @@ describe("asking a question", () => {
   });
 
   it("rejects oversized previews before opening an interaction", async () => {
-    const host = createHost();
+    const host = await createHost();
     const preview = "x".repeat(4096);
 
     const result = await host.harness.callAgentTool(TOOL_NAME, {

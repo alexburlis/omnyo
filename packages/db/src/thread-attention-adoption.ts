@@ -7,6 +7,7 @@ import {
   threadQuestions,
   threadCallbacks,
   threadAttentionImports,
+  pluginSettings,
 } from "./schema.js";
 import type { DbConnection } from "./connection.js";
 import {
@@ -61,6 +62,51 @@ export function adoptLegacyThreadAttention(
 
     db.transaction(
       (tx) => {
+        if (pluginId === "needs-you") {
+          const settingsImportId = "needs-you-settings-v1";
+
+          const settingsImported = tx
+            .select()
+            .from(threadAttentionImports)
+            .where(eq(threadAttentionImports.pluginId, settingsImportId))
+            .get();
+
+          if (settingsImported === undefined) {
+            const booleanKeys = new Set([
+              "needsInput",
+              "unreadFailed",
+              "unreadSuccess",
+              "queued",
+              "working",
+              "callbacks",
+              "callbackLinks",
+            ]);
+
+            const legacySettings = tx
+              .select()
+              .from(pluginSettings)
+              .where(eq(pluginSettings.pluginId, "needs-you"))
+              .all();
+
+            for (const setting of legacySettings) {
+              const valid = booleanKeys.has(setting.key)
+                ? setting.value === "true" || setting.value === "false"
+                : setting.key === "intensity" &&
+                  (setting.value === '"subtle"' || setting.value === '"bold"');
+
+              if (valid)
+                tx.insert(pluginSettings)
+                  .values({ ...setting, pluginId: "ask-user-question" })
+                  .onConflictDoNothing()
+                  .run();
+            }
+
+            tx.insert(threadAttentionImports)
+              .values({ pluginId: settingsImportId, importedAt: Date.now() })
+              .run();
+          }
+        }
+
         if (
           tx
             .select()

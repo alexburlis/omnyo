@@ -36,13 +36,17 @@ export function InstalledPluginsTab({
 }) {
   const [updateTargetId, setUpdateTargetId] = useState<string | null>(null);
 
+  const visibleEntries = entries.filter(
+    ({ plugin }) => plugin.consolidatedInto === undefined,
+  );
+
   const updateTarget =
     updateTargetId === null
       ? null
-      : (entries.find(({ plugin }) => plugin.id === updateTargetId)?.plugin ??
-        null);
+      : (visibleEntries.find(({ plugin }) => plugin.id === updateTargetId)
+          ?.plugin ?? null);
 
-  if (entries.length === 0) {
+  if (visibleEntries.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border">
         <EmptyStateBlock
@@ -65,7 +69,7 @@ export function InstalledPluginsTab({
   return (
     <>
       <PluginCardGrid>
-        {entries.map(({ plugin, catalogEntry }) => (
+        {visibleEntries.map(({ plugin, catalogEntry }) => (
           <InstalledPluginRow
             key={plugin.id}
             plugin={plugin}

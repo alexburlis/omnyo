@@ -5,6 +5,8 @@ description: Search prompt history and manage starred reusable prompts in Omnyo.
 
 # Prompt library
 
+With Skills 0.6.0 or later running, starred prompts migrate without deleting the original records. Existing commands and RPCs forward to Skills only after it reports migration readiness. Skills owns the prompt interface; without compatible Skills, Prompt Library continues to work on its own.
+
 Open **+ → Prompts…** or press **Ctrl+R** in a composer. Search matches
 starred prompts and recent history. Select **Thread**, **Project**, or **All**;
 the scope is remembered per composer kind on this device. The new-thread

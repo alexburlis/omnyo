@@ -261,6 +261,7 @@ export const installedPluginSchema = z.object({
   sourceDisplay: z.string(),
   updateState: pluginUpdateStateSchema,
   enabled: z.boolean(),
+  consolidatedInto: z.string().optional(),
   description: z.string().nullable(),
   name: z.string().nullable(),
   shortName: z.string().nullable().default(null),

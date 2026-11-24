@@ -13,6 +13,7 @@ import {
   upsertHost,
   threadQuestions,
   threadCallbacks,
+  pluginSettings,
   adoptLegacyThreadAttention,
   getCallbackSourceState,
   createQueuedThreadMessage,
@@ -24,6 +25,105 @@ import {
 } from "../../src/index.js";
 
 describe("native attention adoption", () => {
+  it("adopts only missing visual preferences once after an earlier callback adoption", () => {
+    const db = createConnection(":memory:");
+    migrate(db);
+
+    try {
+      adoptLegacyThreadAttention(db, {
+        dataDir: "/path/without/legacy/data",
+        pluginId: "needs-you",
+      });
+      db.delete(pluginSettings).run();
+      db.$client
+        .prepare("DELETE FROM thread_attention_imports WHERE plugin_id = ?")
+        .run("needs-you-settings-v1");
+      db.insert(pluginSettings)
+        .values([
+          {
+            pluginId: "needs-you",
+            key: "needsInput",
+            value: "false",
+            updatedAt: 1,
+          },
+          {
+            pluginId: "needs-you",
+            key: "callbackLinks",
+            value: "false",
+            updatedAt: 1,
+          },
+          {
+            pluginId: "needs-you",
+            key: "intensity",
+            value: '"bold"',
+            updatedAt: 1,
+          },
+          {
+            pluginId: "needs-you",
+            key: "queued",
+            value: '"wrong"',
+            updatedAt: 1,
+          },
+          {
+            pluginId: "needs-you",
+            key: "unrelated",
+            value: "true",
+            updatedAt: 1,
+          },
+          {
+            pluginId: "ask-user-question",
+            key: "needsInput",
+            value: "true",
+            updatedAt: 2,
+          },
+        ])
+        .run();
+
+      expect(
+        adoptLegacyThreadAttention(db, {
+          dataDir: "/path/without/legacy/data",
+          pluginId: "needs-you",
+        }).imported,
+      ).toBe(false);
+
+      const preferences = () =>
+        db
+          .select()
+          .from(pluginSettings)
+          .where(eq(pluginSettings.pluginId, "ask-user-question"))
+          .all()
+          .map(({ key, value }) => ({ key, value }));
+
+      expect(preferences()).toEqual(
+        expect.arrayContaining([
+          { key: "needsInput", value: "true" },
+          { key: "callbackLinks", value: "false" },
+          { key: "intensity", value: '"bold"' },
+        ]),
+      );
+      expect(preferences()).toHaveLength(3);
+
+      db.delete(pluginSettings)
+        .where(eq(pluginSettings.pluginId, "ask-user-question"))
+        .run();
+      adoptLegacyThreadAttention(db, {
+        dataDir: "/path/without/legacy/data",
+        pluginId: "needs-you",
+      });
+
+      expect(preferences()).toEqual([]);
+      expect(
+        db
+          .select()
+          .from(pluginSettings)
+          .where(eq(pluginSettings.pluginId, "needs-you"))
+          .all(),
+      ).toHaveLength(5);
+    } finally {
+      db.$client.close();
+    }
+  });
+
   it("preserves final Decisions revisions, answers, notes and closed states while fencing old writes", () => {
     const directory = mkdtempSync(join(tmpdir(), "omnyo-attention-adoption-"));
     const db = createConnection(":memory:");

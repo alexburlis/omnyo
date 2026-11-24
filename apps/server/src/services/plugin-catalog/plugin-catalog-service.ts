@@ -166,6 +166,7 @@ export function createPluginCatalogService(deps: {
     "installOfficialPlugin" | "installCatalogPlugin" | "resolveCatalogNpmSource"
   >;
   bundledPlugins?: readonly BundledPluginRegistration[];
+  consolidatedInto?: (id: string) => string | undefined;
   fetch?: MarketplaceFetch;
   notifyCatalogChanged?: () => void;
   warn?: (message: string) => void;
@@ -1165,6 +1166,12 @@ export function createPluginCatalogService(deps: {
           return catalog.plugins.map(async (entry) => {
             const bundled = bundledRegistration(entry);
             const pluginId = bundled?.pluginId ?? entry.id;
+
+            if (
+              bundled !== undefined &&
+              deps.consolidatedInto?.(pluginId) !== undefined
+            )
+              return null;
 
             const result = await catalogSearchResult({
               entry,

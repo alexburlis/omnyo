@@ -146,7 +146,12 @@ export function pluginCommandId(
   pluginId: string,
   commandId: string,
 ): PluginCommandId {
-  return pluginCommandIdSchema.parse(`plugin:${pluginId}/${commandId}`);
+  const ownerId =
+    pluginId === "skill-discovery" && commandId === "search-prompts"
+      ? "omnyo--prompt-library"
+      : pluginId;
+
+  return pluginCommandIdSchema.parse(`plugin:${ownerId}/${commandId}`);
 }
 
 const APP_COMMAND_CONTEXT_KEYS = [

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import type { HistoryEntry } from "./history-prompt.js";
 import plugin from "./server.js";
+import { promptLibraryRpcContract } from "./contract.js";
 
 function text(value: string): HistoryEntry["input"] {
   return [{ type: "text", text: value, mentions: [] }];
@@ -56,6 +57,7 @@ async function setup(entries: readonly HistoryEntry[]) {
   const fake = createFakePluginHost({
     pluginId: "prompt-library",
     sdk: {
+      plugins: { list: async () => ({ plugins: [] }) },
       experimental_promptHistory: { list },
       projects: {
         list: async () => [
@@ -86,6 +88,89 @@ afterEach(() => {
 });
 
 describe("prompt library server", () => {
+  it("forwards old commands only after Skills imports the unchanged legacy data", async () => {
+    let skillsEnabled = false;
+    const imported: unknown[] = [];
+
+    const forwarded = vi.fn(
+      async ({ method, input }: { method: string; input?: unknown }) => {
+        if (method === "promptLibraryStatus") return { version: 1 };
+
+        if (method === "importLegacyPrompts") {
+          imported.push(input);
+
+          return { imported: 1 };
+        }
+
+        if (method === "listStarred") return [];
+
+        if (method === "searchLegacy") return { prompts: [] };
+
+        if (method === "star") return { id: "skills-star" };
+
+        if (method === "unstar") return { unstarred: true };
+
+        return null;
+      },
+    );
+
+    const fake = createFakePluginHost({
+      sdk: {
+        plugins: {
+          list: async () => ({
+            plugins: skillsEnabled
+              ? [
+                  {
+                    id: "skill-discovery",
+                    source: "builtin:skill-discovery",
+                    repositoryUrl: null,
+                    enabled: true,
+                    status: "running",
+                    version: "0.6.0",
+                  },
+                ]
+              : [],
+          }),
+          callRpc: forwarded,
+        },
+      },
+    });
+
+    plugin(fake.api);
+
+    const legacy = promptLibraryRpcContract.star.output.parse(
+      await fake.harness.behavior.callRpc("star", {
+        prompt: draft("Old favorite"),
+      }),
+    );
+
+    skillsEnabled = true;
+    const list = await fake.harness.behavior.runCli(["list", "--json"]);
+    expect(JSON.parse(list.stdout ?? "")).toEqual([]);
+    expect(imported[0]).toMatchObject({
+      sourceId: "omnyo--prompt-library",
+      prompts: [{ ...legacy, prompt: draft("Old favorite") }],
+    });
+    await expect(
+      fake.harness.behavior.runCli(["star", "New favorite", "--json"]),
+    ).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: JSON.stringify({ id: "skills-star", text: "New favorite" }),
+    });
+    await expect(
+      fake.harness.behavior.callRpc("search", { ...GLOBAL, query: "favorite" }),
+    ).resolves.toEqual({ prompts: [] });
+    await expect(
+      fake.harness.behavior.callRpc("unstar", { id: "skills-star" }),
+    ).resolves.toEqual({ unstarred: true });
+    expect(
+      await fake.harness.behavior.callRpc("exportStarred", null),
+    ).toMatchObject([{ ...legacy, prompt: draft("Old favorite") }]);
+    expect(forwarded.mock.calls.map(([call]) => call.method)).toContain(
+      "searchLegacy",
+    );
+  });
+
   it("searches a full pasted prompt including text beyond 256 characters", async () => {
     const prefix =
       "Please verify the changes on this branch and explain the results. ".repeat(

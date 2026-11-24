@@ -7,6 +7,9 @@ import {
 import type { ComposerDraft } from "@omnyo/plugin-sdk";
 import {
   promptLibraryRpcContract,
+  starredPromptTransferSchema,
+  skillsPromptStatusSchema,
+  skillsPromptImportResultSchema,
   type PromptRow,
   type SearchPromptsInput,
 } from "./contract.js";
@@ -42,6 +45,111 @@ export default function promptLibraryPlugin(api: PluginApi): void {
   const db = api.storage.database();
   api.storage.migrate(db, STARRED_PROMPT_MIGRATIONS);
   const store = createStarredPromptStore(db);
+
+  function isOmnyoSkills(plugin: {
+    id: string;
+    source: string;
+    repositoryUrl: string | null;
+  }): boolean {
+    return (
+      plugin.id === "skill-discovery" &&
+      (plugin.source === "builtin:skill-discovery" ||
+        (plugin.source.startsWith("path:") &&
+          plugin.repositoryUrl ===
+            "https://github.com/alexburlis/omnyo-plugins/tree/HEAD/skill-discovery"))
+    );
+  }
+
+  async function skillsOwner(): Promise<string | null> {
+    const { plugins } = await api.sdk.plugins.list();
+
+    const skills = plugins.find((plugin) => {
+      if (
+        !isOmnyoSkills(plugin) ||
+        !plugin.enabled ||
+        plugin.status !== "running"
+      )
+        return false;
+      const match = /^(\d+)\.(\d+)\./u.exec(plugin.version);
+
+      return match !== null && (Number(match[1]) > 0 || Number(match[2]) >= 6);
+    });
+
+    if (!skills) return null;
+
+    const status = await api.sdk.plugins.callRpc({
+      pluginId: skills.id,
+      method: "promptLibraryStatus",
+      input: null,
+      outputSchema: skillsPromptStatusSchema,
+    });
+
+    skillsPromptStatusSchema.parse(status);
+    await api.sdk.plugins.callRpc({
+      pluginId: skills.id,
+      method: "importLegacyPrompts",
+      input: {
+        sourceId: "omnyo--prompt-library",
+        prompts: store.list().map(({ id, prompt, createdAt, lastUsedAt }) => ({
+          id,
+          prompt: {
+            text: prompt.text,
+            mentions: prompt.mentions.map((mention) => ({ ...mention })),
+          },
+          createdAt,
+          lastUsedAt,
+        })),
+      },
+      outputSchema: skillsPromptImportResultSchema,
+    });
+
+    return skills.id;
+  }
+
+  async function listStarred() {
+    const owner = await skillsOwner();
+
+    if (owner === null) return store.list();
+
+    const result = await api.sdk.plugins.callRpc({
+      pluginId: owner,
+      method: "listStarred",
+      input: null,
+      outputSchema: starredPromptTransferSchema.array(),
+    });
+
+    return starredPromptTransferSchema.array().parse(result);
+  }
+
+  async function unstar(id: string) {
+    const owner = await skillsOwner();
+
+    if (owner === null) return { unstarred: store.unstar(id) };
+
+    return promptLibraryRpcContract.unstar.output.parse(
+      await api.sdk.plugins.callRpc({
+        pluginId: owner,
+        method: "unstar",
+        input: { id },
+        outputSchema: promptLibraryRpcContract.unstar.output,
+      }),
+    );
+  }
+
+  async function markUsed(id: string) {
+    const owner = await skillsOwner();
+
+    if (owner === null) store.markUsed(id, Date.now());
+    else
+      await api.sdk.plugins.callRpc({
+        pluginId: owner,
+        method: "markUsed",
+        input: { id },
+        outputSchema: promptLibraryRpcContract.markUsed.output,
+      });
+
+    return null;
+  }
 
   const historyCache = createHistoryCache((args) =>
     api.sdk.experimental_promptHistory.list(args),
@@ -189,6 +297,17 @@ export default function promptLibraryPlugin(api: PluginApi): void {
   }
 
   async function search(input: SearchPromptsInput) {
+    const owner = await skillsOwner();
+
+    if (owner !== null)
+      return promptLibraryRpcContract.search.output.parse(
+        await api.sdk.plugins.callRpc({
+          pluginId: owner,
+          method: "searchLegacy",
+          input,
+          outputSchema: promptLibraryRpcContract.search.output,
+        }),
+      );
     const starredPrompts = store.list();
 
     const starredIdsByText = new Map(
@@ -239,7 +358,29 @@ export default function promptLibraryPlugin(api: PluginApi): void {
     return { prompts };
   }
 
-  function star(prompt: ComposerDraft): StarredPrompt {
+  async function star(
+    prompt: ComposerDraft,
+  ): Promise<{ id: string; prompt: ComposerDraft }> {
+    const owner = await skillsOwner();
+
+    if (owner !== null) {
+      const result = promptLibraryRpcContract.star.output.parse(
+        await api.sdk.plugins.callRpc({
+          pluginId: owner,
+          method: "star",
+          input: {
+            prompt: {
+              text: prompt.text,
+              mentions: prompt.mentions.map((mention) => ({ ...mention })),
+            },
+          },
+          outputSchema: promptLibraryRpcContract.star.output,
+        }),
+      );
+
+      return { ...result, prompt };
+    }
+
     const starred = store.star(prompt, Date.now());
 
     if (starred === null) {
@@ -250,16 +391,27 @@ export default function promptLibraryPlugin(api: PluginApi): void {
   }
 
   api.rpc.register(promptLibraryRpcContract, {
-    search,
-    star: ({ prompt }) => ({
-      id: star({ text: prompt.text, mentions: prompt.mentions }).id,
-    }),
-    unstar: ({ id }) => ({ unstarred: store.unstar(id) }),
-    markUsed({ id }) {
-      store.markUsed(id, Date.now());
+    exportStarred: async (_input, { experimental_caller: caller }) => {
+      if (caller.kind === "plugin") {
+        const { plugins } = await api.sdk.plugins.list();
 
-      return null;
+        if (
+          !plugins.some(
+            (plugin) => plugin.id === caller.pluginId && isOmnyoSkills(plugin),
+          )
+        ) {
+          throw new Error(
+            "Only Omnyo Skills can import Prompt Library favorites.",
+          );
+        }
+      }
+
+      return store.list();
     },
+    search,
+    star: async ({ prompt }) => ({ id: (await star(prompt)).id }),
+    unstar: ({ id }) => unstar(id),
+    markUsed: ({ id }) => markUsed(id),
   });
 
   api.cli.register(
@@ -333,8 +485,8 @@ export default function promptLibraryPlugin(api: PluginApi): void {
         list: cliCommand({
           summary: "List starred prompts, most recently used first",
           options: { json: JSON_OPTION },
-          run({ options }) {
-            const prompts = store.list();
+          async run({ options }) {
+            const prompts = await listStarred();
 
             if (options.json) {
               return {
@@ -375,8 +527,8 @@ export default function promptLibraryPlugin(api: PluginApi): void {
             },
           ],
           options: { json: JSON_OPTION },
-          run({ options, positionals }) {
-            const starred = star({
+          async run({ options, positionals }) {
+            const starred = await star({
               text: positionals.text.join(" "),
               mentions: [],
             });
@@ -400,8 +552,8 @@ export default function promptLibraryPlugin(api: PluginApi): void {
             },
           ],
           options: { json: JSON_OPTION },
-          run({ options, positionals }) {
-            if (!store.unstar(positionals.id)) {
+          async run({ options, positionals }) {
+            if (!(await unstar(positionals.id)).unstarred) {
               throw new PluginCliError(
                 `Unknown starred prompt: ${positionals.id}`,
                 {

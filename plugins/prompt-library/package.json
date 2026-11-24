@@ -1,6 +1,6 @@
 {
   "name": "omnyo-plugin-omnyo--prompt-library",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Search previous prompts, star favorites, and insert them into the composer.",

@@ -18,7 +18,15 @@ export function installedPluginCatalogEntry<
   entries: readonly Entry[],
   { allowSourceFallback = true }: { allowSourceFallback?: boolean } = {},
 ): Entry | undefined {
-  if (plugin.source.startsWith("path:")) return undefined;
+  if (plugin.source.startsWith("path:")) {
+    return entries.find(
+      (entry) =>
+        entry.pluginId === plugin.id &&
+        entry.marketplace === "omnyo-official" &&
+        entry.source.startsWith("builtin:") &&
+        entry.installed,
+    );
+  }
 
   if (
     plugin.source.startsWith("builtin:") &&

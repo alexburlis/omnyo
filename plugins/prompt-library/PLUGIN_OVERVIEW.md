@@ -3,6 +3,8 @@ Find any prompt you have sent before, star the ones you reuse, and drop them bac
 Disabled by default. Enable **Prompt Library** in Settings → Plugins or run
 `omnyo plugin enable omnyo--prompt-library`.
 
+With Skills 0.6.0 or later running, this plugin imports its starred prompts into Skills and forwards its existing commands and RPCs. Skills owns the prompt interface after migration succeeds. Without compatible Skills, the standalone behavior below remains available.
+
 ## What you get
 
 - A **Prompts…** entry in the composer plus menu, also bound to **Ctrl+R** (rebind it as "Search prompts" in keyboard settings).

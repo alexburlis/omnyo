@@ -151,7 +151,28 @@ export const searchPromptsInputSchema = z
 
 export type SearchPromptsInput = z.infer<typeof searchPromptsInputSchema>;
 
+export const starredPromptTransferSchema = z
+  .object({
+    id: z.string().min(1),
+    prompt: draftSchema,
+    createdAt: z.number(),
+    lastUsedAt: z.number().nullable(),
+  })
+  .strict();
+
+export const skillsPromptImportResultSchema = z
+  .object({ imported: z.number().int().nonnegative() })
+  .strict();
+
+export const skillsPromptStatusSchema = z
+  .object({ version: z.literal(1) })
+  .strict();
+
 export const promptLibraryRpcContract = defineRpcContract({
+  exportStarred: {
+    input: z.null(),
+    output: z.array(starredPromptTransferSchema),
+  },
   search: {
     input: searchPromptsInputSchema,
     output: z

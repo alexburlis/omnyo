@@ -62,6 +62,20 @@ describe("installed plugin catalog identity", () => {
       ),
     ).toBe(official);
   });
+  it("links a local checkout to the official listing after catalog reconciliation", () => {
+    const matched = { ...official, installed: true };
+    expect(
+      installedPluginCatalogEntry(
+        {
+          id: "notes",
+          catalogEntryId: null,
+          catalogMarketplaceName: null,
+          source: "path:/workspace/notes",
+        },
+        [{ ...community, installed: true }, matched],
+      ),
+    ).toBe(matched);
+  });
   it("requires complete installation metadata when source fallback is disabled", () => {
     for (const metadata of [
       { catalogEntryId: null, catalogMarketplaceName: null },

@@ -1,5 +1,10 @@
 import { verifyBuiltinPluginArtifact } from "./builtin-plugin-artifacts.js";
 import {
+  isOmnyoConsolidationSource,
+  needsPromptLibraryAdoption,
+  stageLegacyPromptLibrary,
+} from "./plugin-consolidations.js";
+import {
   isMaintenanceFrozen,
   isServerMoveFrozen,
 } from "../server-move/freeze-state.js";
@@ -2594,6 +2599,13 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
         await discardCandidate(plugin);
 
         return null;
+      }
+
+      if (
+        needsPromptLibraryAdoption(row.id, manifest.version) &&
+        isOmnyoConsolidationSource(row.id, row.source, manifest.repositoryUrl)
+      ) {
+        stageLegacyPromptLibrary(deps.dataDir, handle.api.storage.database());
       }
 
       await runFactoryTimeBoxed(

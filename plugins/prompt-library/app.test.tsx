@@ -120,7 +120,7 @@ function render(
         scope: options.scope ?? { kind: "thread", threadId: "thr_1" },
         text: options.draft ?? "",
       },
-      rpc: { search, star, unstar, markUsed },
+      rpc: { search, star, unstar, markUsed, exportStarred: () => [] },
     },
   );
 

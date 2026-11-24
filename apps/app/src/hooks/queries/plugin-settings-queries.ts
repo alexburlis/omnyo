@@ -44,6 +44,7 @@ export interface PluginListItem {
   description: string | null;
   name: string | null;
   shortName: string | null;
+  consolidatedInto?: string;
   icon: string | null;
   compactIconUrl: string | null;
   logoUrl: string | null;
@@ -112,6 +113,9 @@ export function toPluginListItem(plugin: InstalledPlugin): PluginListItem {
     description: plugin.description,
     name: plugin.name,
     shortName: plugin.shortName,
+    ...(plugin.consolidatedInto === undefined
+      ? {}
+      : { consolidatedInto: plugin.consolidatedInto }),
     icon: plugin.icon,
     compactIconUrl: plugin.iconUrl,
     logoUrl: plugin.logoUrl,

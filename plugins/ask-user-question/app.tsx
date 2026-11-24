@@ -9,6 +9,7 @@ import {
   ASK_USER_QUESTION_RENDERER_ID,
   interactionPayloadSchema,
 } from "./src/contracts.js";
+import { NeedsYouOverlay } from "./src/sidebar/overlay.js";
 
 function AskUserQuestionInteraction({
   interaction,
@@ -57,6 +58,10 @@ function AskUserQuestionInteraction({
 }
 
 export default definePluginApp((app) => {
+  app.slots.experimental_appOverlay({
+    id: "sidebar-highlight",
+    component: NeedsYouOverlay,
+  });
   app.slots.pendingInteraction({
     id: ASK_USER_QUESTION_RENDERER_ID,
     component: AskUserQuestionInteraction,

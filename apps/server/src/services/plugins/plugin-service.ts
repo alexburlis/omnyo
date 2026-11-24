@@ -179,6 +179,10 @@ import {
 import type { PluginEnvironmentProviderBridge } from "./plugin-environment-provider-registry.js";
 import { createPluginRegistration } from "./plugin-registration.js";
 import {
+  consolidatedPluginOwner,
+  isOmnyoConsolidationSource,
+} from "./plugin-consolidations.js";
+import {
   createPluginRuntime,
   forgetMutableRoot,
   type PluginLoadHold,
@@ -271,6 +275,7 @@ export interface PluginService {
   stop(): Promise<void>;
   handleUncaughtException(error: unknown): boolean;
   list(): InstalledPlugin[];
+  consolidatedInto(id: string): string | undefined;
   getThreadWorkContributorStates(): ReadonlyMap<string, boolean>;
   getDisplayName(id: string): string;
   providerCatalog(): Array<{
@@ -1174,6 +1179,27 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     );
   }
 
+  function consolidatedInto(id: string): string | undefined {
+    return consolidatedPluginOwner(id, (successor) => {
+      const active = loaded.get(successor);
+      const row = getInstalledPlugin(deps.db, successor);
+
+      if (
+        active === undefined ||
+        row === undefined ||
+        appBundles.get(successor)?.state.bundle?.compatible !== true ||
+        !isOmnyoConsolidationSource(
+          successor,
+          row.source,
+          active.manifest.repositoryUrl,
+        )
+      )
+        return undefined;
+
+      return active.manifest.version;
+    });
+  }
+
   function list(): InstalledPlugin[] {
     const scheduleRows = listPluginSchedules(deps.db);
     const rows = listInstalledPlugins(deps.db);
@@ -1191,6 +1217,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           loadedPlugin === undefined ? identities.get(row.id) : undefined;
 
         const brandingSet = brandingAssetSetFor(row.id);
+        const successor = consolidatedInto(row.id);
 
         const catalogMetadata = catalogData.metadataByPluginId.get(row.id) ?? {
           screenshots: [],
@@ -1227,6 +1254,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           sourceDisplay: sourceDisplayForRow(row),
           updateState: updateStateForRow(row),
           enabled: row.enabled,
+          ...(successor === undefined ? {} : { consolidatedInto: successor }),
           description:
             loadedPlugin?.manifest.description ??
             identity?.manifest.description ??
@@ -1277,7 +1305,13 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           hasSettings:
             loadedPlugin !== undefined &&
             Object.keys(loadedPlugin.handle.settings.descriptors).length > 0,
-          app: appBundles.get(row.id)?.state ?? { hasApp: false, bundle: null },
+          app:
+            successor === undefined
+              ? (appBundles.get(row.id)?.state ?? {
+                  hasApp: false,
+                  bundle: null,
+                })
+              : { hasApp: false, bundle: null },
           logoUrl: brandingSet?.logo?.url ?? null,
           logoDarkUrl: brandingSet?.logoDark?.url ?? null,
           providerIds:
@@ -1676,6 +1710,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     },
 
     bindSdk: bindRuntimeSdk,
+    consolidatedInto,
 
     reconcileFrozenBoot() {
       if (loaded.size !== 0 || getMaintenanceActivity().pluginLoads !== 0) {
@@ -2235,7 +2270,10 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     },
 
     getThreadBootstrapAssetUrls() {
-      return getPluginThreadBootstrapAssetUrls(loaded, appBundles);
+      return getPluginThreadBootstrapAssetUrls(
+        [...loaded].filter(([id]) => consolidatedInto(id) === undefined),
+        appBundles,
+      );
     },
 
     getAppAsset(id, kind) {

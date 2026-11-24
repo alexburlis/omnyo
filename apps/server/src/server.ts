@@ -1507,6 +1507,7 @@ export function createApp(
     appVersion: deps.config.appVersion,
     dataDir: deps.config.dataDir,
     plugins: pluginService,
+    consolidatedInto: (id) => pluginService.consolidatedInto(id),
     notifyCatalogChanged: () => deps.hub.notifySystem(["plugins-changed"]),
     warn: (message) => deps.logger.warn(message),
   });
