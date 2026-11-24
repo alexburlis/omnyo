@@ -1,0 +1,142 @@
+.fv-sentry {
+  --sn-glow: color-mix(in oklab, var(--fv-bad) 3%, transparent);
+  --sn-lift: color-mix(in oklab, var(--fv-ink) 20%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 1.1em 1.8em;
+  background:
+    radial-gradient(60% 50% at 30% 0, var(--sn-glow), transparent),
+    var(--fv-chrome);
+}
+
+.dark .fv-sentry {
+  --sn-glow: rgb(255 140 140 / 0.06);
+  --sn-lift: rgb(0 0 0 / 0.7);
+}
+
+.fv-sentry-head {
+  display: flex;
+  align-items: center;
+  gap: 1.1em;
+}
+
+.fv-sentry-head b {
+  font-size: 1.15em;
+}
+
+.fv-sentry-tabs {
+  display: flex;
+  gap: 0.2em;
+  padding: 0.2em;
+  border-radius: 0.7em;
+  background: var(--fv-raise);
+  font-size: 0.86em;
+  color: var(--fv-dim);
+}
+
+.fv-sentry-tabs span {
+  padding: 0.2em 0.8em;
+  border-radius: 0.5em;
+}
+
+.fv-sentry-tabs .is-on {
+  background: var(--fv-select);
+  color: var(--fv-ink);
+}
+
+.fv-sentry-focus {
+  display: grid;
+  gap: 0.55em;
+  padding: 0.9em 1.2em;
+  border-radius: 1.2em;
+  background: var(--fv-canvas);
+  box-shadow: 0 1.6em 3em -1.2em var(--sn-lift);
+}
+
+.fv-sentry-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+}
+
+.fv-sentry-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.05em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fv-sentry-place {
+  margin-top: -0.4em;
+  padding-left: 1.2em;
+  font-size: 0.9em;
+}
+
+.fv-sentry-count {
+  flex: none;
+  font-size: 0.86em;
+  color: var(--fv-soft);
+  white-space: nowrap;
+}
+
+.fv-sentry-status {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding-top: 0.6em;
+  border-top: 1px solid var(--fv-seam);
+}
+
+.fv-sentry-ready {
+  background: color-mix(in oklch, var(--fv-ok) 16%, var(--fv-canvas));
+  color: var(--fv-ink);
+  font-weight: 560;
+}
+
+.fv-sentry-steps {
+  display: flex;
+  gap: 0.35em;
+}
+
+.fv-sentry-steps li {
+  flex: 1;
+  padding-top: 0.5em;
+  border-top: 0.2em solid var(--fv-ok);
+  font-size: 0.72em;
+  color: var(--fv-soft);
+}
+
+.fv-sentry-list {
+  display: grid;
+  gap: 0.4em;
+}
+
+.fv-sentry-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  padding: 0.45em 0.5em 0.45em 1em;
+}
+
+.fv-sentry-issue {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.fv-sentry-issue .fv-dim {
+  font-size: 0.8em;
+}
+
+.fv-sentry-button {
+  flex: none;
+  padding: 0.35em 1.1em;
+  border-radius: 0.6em;
+  background: var(--fv-ink);
+  color: var(--fv-canvas);
+  font-size: 0.86em;
+  font-weight: 560;
+}

@@ -1,0 +1,345 @@
+.fv-keyboard-prompts {
+  --kp-loop: 9s;
+
+  background:
+    radial-gradient(60% 45% at 50% 100%, rgb(255 200 150 / 0.06), transparent),
+    var(--fv-canvas);
+}
+
+.fv-keyboard-prompts svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-pop {
+  position: absolute;
+  right: 3em;
+  bottom: 5.3em;
+  left: 3em;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--fv-hair);
+  border-radius: 1em;
+  background: var(--fv-raise);
+  box-shadow: 0 1.4em 3em -1em var(--fv-shade);
+  transform-origin: 50% 100%;
+}
+
+.dark .fv-keyboard-prompts .fv-keyboard-prompts-pop {
+  box-shadow: 0 1.4em 3em -1em rgb(0 0 0 / 0.75);
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-search {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  height: 3em;
+  padding: 0 0.8em 0 1em;
+  border-bottom: 1px solid var(--fv-seam);
+  white-space: nowrap;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-lens {
+  width: 1.1em;
+  height: 1.1em;
+  color: var(--fv-dim);
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-query {
+  position: relative;
+  flex: 1;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-query i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 5.2em;
+  background: var(--fv-raise);
+  transform: scaleX(0);
+  transform-origin: right;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-scope {
+  display: inline-flex;
+  padding: 0.15em;
+  border-radius: 0.55em;
+  background: var(--fv-chrome);
+  font-size: 0.8em;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-scope span {
+  padding: 0.2em 0.65em;
+  border-radius: 0.4em;
+  color: var(--fv-dim);
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-scope .is-on {
+  background: var(--fv-select);
+  color: var(--fv-ink);
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-lists {
+  display: grid;
+  padding: 0.4em 0.5em 0.6em;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-lists > ul {
+  grid-area: 1 / 1;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-lists li {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 1.95em;
+  padding: 0 0.6em;
+  overflow: hidden;
+  border-radius: 0.5em;
+  font-size: 0.92em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-lists li.fv-keyboard-prompts-section {
+  height: 1.7em;
+  color: var(--fv-dim);
+  font-size: 0.76em;
+  font-weight: 600;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-lists li.is-hit {
+  background: var(--fv-select);
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-lists li svg {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  fill: var(--fv-attn);
+  stroke: var(--fv-attn);
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-all {
+  color: var(--fv-soft);
+  opacity: 0;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-composer {
+  position: absolute;
+  right: 3em;
+  bottom: 1.4em;
+  left: 3em;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  height: 3.3em;
+  padding: 0 0.8em 0 1em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 1em;
+  background: var(--fv-raise);
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-draft,
+.fv-keyboard-prompts .fv-keyboard-prompts-placeholder {
+  grid-area: 1 / 1;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-draft {
+  position: relative;
+  opacity: 0;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-draft i {
+  position: absolute;
+  inset: 0;
+  background: var(--fv-raise);
+  transform: scaleX(0);
+  transform-origin: right;
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-placeholder {
+  color: var(--fv-dim);
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-chord {
+  grid-column: 2;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-keyboard-prompts .fv-keyboard-prompts-pop {
+    animation: fv-keyboard-prompts-pop var(--kp-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-keyboard-prompts .fv-keyboard-prompts-query i {
+    animation: fv-keyboard-prompts-type var(--kp-loop) steps(9, end) infinite;
+  }
+
+  .fv-keyboard-prompts .fv-keyboard-prompts-all {
+    animation: fv-keyboard-prompts-all var(--kp-loop) linear infinite;
+  }
+
+  .fv-keyboard-prompts .fv-keyboard-prompts-found {
+    animation: fv-keyboard-prompts-found var(--kp-loop) linear infinite;
+  }
+
+  .fv-keyboard-prompts .fv-keyboard-prompts-draft {
+    animation: fv-keyboard-prompts-draft var(--kp-loop) linear infinite;
+  }
+
+  .fv-keyboard-prompts .fv-keyboard-prompts-draft i {
+    animation: fv-keyboard-prompts-reveal var(--kp-loop) steps(16, end) infinite;
+  }
+
+  .fv-keyboard-prompts .fv-keyboard-prompts-placeholder {
+    animation: fv-keyboard-prompts-placeholder var(--kp-loop) linear infinite;
+  }
+
+  .fv-keyboard-prompts .fv-keyboard-prompts-chord {
+    animation: fv-keyboard-prompts-chord var(--kp-loop) var(--fv-swap) infinite;
+  }
+}
+
+@keyframes fv-keyboard-prompts-pop {
+  0%,
+  6% {
+    opacity: 0;
+    transform: translateY(0.6em) scale(0.98);
+  }
+
+  10%,
+  58% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  62%,
+  100% {
+    opacity: 0;
+    transform: translateY(0.6em) scale(0.98);
+  }
+}
+
+@keyframes fv-keyboard-prompts-type {
+  0%,
+  12% {
+    transform: scaleX(1);
+  }
+
+  30%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes fv-keyboard-prompts-all {
+  0%,
+  29% {
+    opacity: 1;
+  }
+
+  31%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-keyboard-prompts-found {
+  0%,
+  31% {
+    opacity: 0;
+  }
+
+  33%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-keyboard-prompts-draft {
+  0%,
+  61% {
+    opacity: 0;
+  }
+
+  62%,
+  95% {
+    opacity: 1;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-keyboard-prompts-reveal {
+  0%,
+  62% {
+    transform: scaleX(1);
+  }
+
+  70%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes fv-keyboard-prompts-placeholder {
+  0%,
+  61% {
+    opacity: 1;
+  }
+
+  62%,
+  97% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-keyboard-prompts-chord {
+  0% {
+    opacity: 0;
+    transform: scale(1);
+  }
+
+  3% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  5% {
+    transform: scale(0.88);
+  }
+
+  7%,
+  12% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  16%,
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+.fv-keyboard-prompts .fv-keyboard-prompts-agent {
+  position: absolute;
+  top: 2.2em;
+  right: 3em;
+  left: 3em;
+  color: var(--fv-soft);
+}

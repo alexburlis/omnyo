@@ -1,0 +1,75 @@
+{
+  "revision": 2,
+  "sha256": "95c025bcf1ad32734e69fd000ca17abcba70b5508a8a57c760456d566133e5c5",
+  "candidateBudget": {
+    "target": 7,
+    "limit": 14
+  },
+  "schedule": {
+    "cron": "0 9 * * 1",
+    "tz": "America/Toronto"
+  },
+  "capabilities": ["model-text", "write-run-artifacts"],
+  "inputs": [
+    {
+      "id": "startup",
+      "label": "Startup name",
+      "type": "text"
+    },
+    {
+      "id": "audience",
+      "label": "Audience",
+      "type": "text"
+    },
+    {
+      "id": "product-facts",
+      "label": "Product facts and supplied evidence",
+      "type": "text"
+    },
+    {
+      "id": "reference-urls",
+      "label": "Supplied source URLs (one per line)",
+      "type": "text"
+    },
+    {
+      "id": "inventory",
+      "label": "Existing topics and canonical inventory",
+      "type": "text"
+    },
+    {
+      "id": "example-content",
+      "label": "Example content",
+      "type": "text"
+    },
+    {
+      "id": "terminology",
+      "label": "Preferred terminology",
+      "type": "text"
+    },
+    {
+      "id": "exclusions",
+      "label": "Topics and claims to exclude",
+      "type": "text"
+    },
+    {
+      "id": "output-language",
+      "label": "Output language",
+      "type": "text"
+    },
+    {
+      "id": "output-format",
+      "label": "Output format",
+      "type": "text"
+    },
+    {
+      "id": "timezone",
+      "label": "Timezone",
+      "type": "timezone"
+    },
+    {
+      "id": "delivery-weekday",
+      "label": "First delivery weekday (1 is Monday, 7 is Sunday)",
+      "type": "integer"
+    }
+  ]
+}

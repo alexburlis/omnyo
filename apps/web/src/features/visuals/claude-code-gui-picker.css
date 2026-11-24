@@ -1,0 +1,549 @@
+.fv.fv-claude-code-gui-picker {
+  --cp-loop: 8s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-canvas);
+}
+
+.fv-claude-code-gui-picker .fv-cp-thread {
+  position: absolute;
+  top: 1.2em;
+  left: 2em;
+  right: 2em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  font-size: 0.9em;
+}
+
+.fv-claude-code-gui-picker .fv-cp-you {
+  align-self: flex-end;
+  padding: 0.35em 0.9em;
+  border-radius: 1em;
+  background: var(--fv-select);
+}
+
+.fv-claude-code-gui-picker .fv-cp-say {
+  color: var(--fv-soft);
+}
+
+.fv-claude-code-gui-picker .fv-cp-pop {
+  position: absolute;
+  left: 1.6em;
+  width: 24.5em;
+  bottom: 5.4em;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.7em 0.8em 0.8em;
+  background: var(--fv-chrome);
+  box-shadow: 0 1.4em 2.8em -1em
+    color-mix(in oklab, var(--fv-ink) 35%, transparent);
+  transform-origin: 20% 100%;
+}
+
+.dark .fv-claude-code-gui-picker .fv-cp-pop {
+  box-shadow: 0 1.4em 2.8em -1em rgb(0 0 0 / 0.85);
+}
+
+.fv-claude-code-gui-picker .fv-cp-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 1.9em;
+  padding: 0 0.6em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.55em;
+  background: var(--fv-canvas);
+  font-family: var(--fv-mono);
+  font-size: 0.86em;
+}
+
+.fv-claude-code-gui-picker .fv-cp-search svg {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: var(--fv-dim);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.fv-claude-code-gui-picker .fv-cp-letter {
+  display: inline-block;
+  width: 0.6em;
+}
+
+.fv-claude-code-gui-picker .fv-cp-caret {
+  position: absolute;
+  top: 0.45em;
+  left: 2.3em;
+  width: 1px;
+  height: 1em;
+  background: var(--fv-info);
+}
+
+.fv-claude-code-gui-picker .fv-cp-grid {
+  display: grid;
+  grid-template-columns: 6em repeat(6, 1fr);
+  align-items: center;
+  row-gap: 0.4em;
+}
+
+.fv-claude-code-gui-picker .fv-cp-group {
+  font-size: 0.66em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fv-dim);
+}
+
+.fv-claude-code-gui-picker .fv-cp-level {
+  font-size: 0.64em;
+  text-align: center;
+  color: var(--fv-dim);
+}
+
+.fv-claude-code-gui-picker .fv-cp-model {
+  overflow: hidden;
+  font-size: 0.86em;
+  font-weight: 560;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-claude-code-gui-picker .fv-cp-model.is-more {
+  grid-column: 1 / -1;
+  font-weight: 400;
+  color: var(--fv-dim);
+}
+
+.fv-claude-code-gui-picker .fv-cp-cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 1.7em;
+}
+
+.fv-claude-code-gui-picker .fv-cp-cell i {
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: var(--fv-hair);
+}
+
+.fv-claude-code-gui-picker .fv-cp-cell:is(.is-from, .is-to)::before {
+  content: "";
+  position: absolute;
+  inset: 0.1em 0.15em;
+  border: 1px solid color-mix(in oklch, var(--fv-info) 70%, transparent);
+  border-radius: 0.5em;
+  background: color-mix(in oklab, var(--fv-info) 20%, transparent);
+}
+
+.fv-claude-code-gui-picker .fv-cp-cell:is(.is-from, .is-to) i {
+  background: var(--fv-info);
+}
+
+.fv-claude-code-gui-picker .fv-cp-cell.is-from::before,
+.fv-claude-code-gui-picker .fv-cp-cell.is-from i {
+  opacity: 0;
+}
+
+.fv-claude-code-gui-picker .fv-cp-composer {
+  position: absolute;
+  left: 1.2em;
+  right: 1.2em;
+  bottom: 0.9em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.7em 0.8em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 1em;
+  background: var(--fv-raise);
+}
+
+.fv-claude-code-gui-picker .fv-cp-placeholder {
+  font-size: 0.9em;
+  color: var(--fv-dim);
+}
+
+.fv-claude-code-gui-picker .fv-cp-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.fv-claude-code-gui-picker .fv-cp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.2em 0.65em;
+  border-radius: 0.55em;
+  background: var(--fv-select);
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.fv-claude-code-gui-picker .fv-cp-chip svg {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: oklch(0.72 0.13 45);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.fv-claude-code-gui-picker .fv-cp-chip.is-mode {
+  background: transparent;
+  color: var(--fv-soft);
+}
+
+.fv-claude-code-gui-picker .fv-cp-swap {
+  display: inline-grid;
+  color: var(--fv-soft);
+}
+
+.fv-claude-code-gui-picker .fv-cp-swap > span {
+  grid-area: 1 / 1;
+}
+
+.fv-claude-code-gui-picker .fv-cp-swap > .is-a {
+  opacity: 0;
+}
+
+.fv-claude-code-gui-picker .fv-cp-bolt {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 1.7em;
+  height: 1.7em;
+  border-radius: 0.5em;
+}
+
+.fv-claude-code-gui-picker .fv-cp-bolt::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--fv-attn) 22%, transparent);
+  opacity: 0;
+}
+
+.fv-claude-code-gui-picker .fv-cp-bolt svg {
+  position: relative;
+  width: 1.05em;
+  height: 1.05em;
+  fill: var(--fv-attn);
+}
+
+.fv-claude-code-gui-picker .fv-cp-send {
+  display: grid;
+  place-items: center;
+  width: 1.8em;
+  height: 1.8em;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--fv-ink);
+}
+
+.fv-claude-code-gui-picker .fv-cp-send svg {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: var(--fv-canvas);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-claude-code-gui-picker
+  :where(
+    .fv-cp-pop,
+    .fv-cp-letter,
+    .fv-cp-caret,
+    .is-out,
+    .fv-cp-cell i,
+    .fv-cp-swap > span,
+    .fv-cp-bolt svg
+  ),
+.fv-claude-code-gui-picker .fv-cp-cell::before,
+.fv-claude-code-gui-picker .fv-cp-bolt::before {
+  animation: var(--cp-loop) var(--fv-swap) infinite both;
+}
+
+.fv-claude-code-gui-picker .fv-cp-pop {
+  animation-name: fv-cp-pop;
+}
+
+.fv-claude-code-gui-picker .fv-cp-letter {
+  animation-name: fv-cp-letter;
+  animation-timing-function: linear;
+}
+
+.fv-claude-code-gui-picker .fv-cp-letter.is-q1 {
+  animation-delay: 0.18s;
+}
+
+.fv-claude-code-gui-picker .fv-cp-letter.is-q2 {
+  animation-delay: 0.36s;
+}
+
+.fv-claude-code-gui-picker .fv-cp-letter.is-q3 {
+  animation-delay: 0.54s;
+}
+
+.fv-claude-code-gui-picker .fv-cp-letter.is-q4 {
+  animation-delay: 0.72s;
+}
+
+.fv-claude-code-gui-picker .fv-cp-letter.is-q5 {
+  animation-delay: 0.9s;
+}
+
+.fv-claude-code-gui-picker .fv-cp-letter.is-q6 {
+  animation-delay: 1.08s;
+}
+
+.fv-claude-code-gui-picker .fv-cp-letter.is-q7 {
+  animation-delay: 1.26s;
+}
+
+.fv-claude-code-gui-picker .fv-cp-caret {
+  animation-name: fv-cp-caret;
+}
+
+.fv-claude-code-gui-picker .is-out {
+  animation-name: fv-cp-out;
+}
+
+.fv-claude-code-gui-picker .fv-cp-cell.is-from::before,
+.fv-claude-code-gui-picker .fv-cp-cell.is-from i {
+  animation-name: fv-cp-from;
+}
+
+.fv-claude-code-gui-picker .fv-cp-cell.is-to::before,
+.fv-claude-code-gui-picker .fv-cp-cell.is-to i {
+  animation-name: fv-cp-to;
+}
+
+.fv-claude-code-gui-picker .fv-cp-cell:not(.is-from, .is-to) i,
+.fv-claude-code-gui-picker .fv-cp-cell:not(.is-from, .is-to)::before {
+  animation: none;
+}
+
+.fv-claude-code-gui-picker .fv-cp-cell.is-out i {
+  animation: none;
+}
+
+.fv-claude-code-gui-picker .fv-cp-swap > .is-a {
+  animation-name: fv-cp-swap-a;
+}
+
+.fv-claude-code-gui-picker .fv-cp-swap > .is-b {
+  animation-name: fv-cp-swap-b;
+}
+
+.fv-claude-code-gui-picker .fv-cp-bolt::before {
+  animation-name: fv-cp-bolt-on;
+}
+
+.fv-claude-code-gui-picker .fv-cp-bolt svg {
+  animation-name: fv-cp-bolt;
+}
+
+@keyframes fv-cp-pop {
+  0%,
+  44% {
+    opacity: 1;
+    transform: none;
+  }
+
+  50%,
+  94% {
+    opacity: 0;
+    transform: translateY(0.6em) scale(0.97);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-cp-letter {
+  0%,
+  14.9% {
+    opacity: 0;
+  }
+
+  15%,
+  60% {
+    opacity: 1;
+  }
+
+  61%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-cp-caret {
+  0%,
+  15% {
+    transform: none;
+    animation-timing-function: steps(8, end);
+  }
+
+  33%,
+  60% {
+    transform: translateX(4.8em);
+  }
+
+  61%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-cp-out {
+  0%,
+  21% {
+    opacity: 1;
+  }
+
+  25%,
+  70% {
+    opacity: 0.12;
+  }
+
+  75%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-cp-from {
+  0%,
+  32% {
+    opacity: 1;
+  }
+
+  35%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-cp-to {
+  0%,
+  32% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  36%,
+  60% {
+    opacity: 1;
+    transform: none;
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-cp-swap-a {
+  0%,
+  47% {
+    opacity: 1;
+  }
+
+  50%,
+  95% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-cp-swap-b {
+  0%,
+  47% {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  51%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-cp-bolt-on {
+  0%,
+  60% {
+    opacity: 0;
+  }
+
+  64%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-cp-bolt {
+  0%,
+  60% {
+    opacity: 0.4;
+    transform: none;
+  }
+
+  63% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
+
+  67%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0.4;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-claude-code-gui-picker *,
+  .fv-claude-code-gui-picker *::before,
+  .fv-claude-code-gui-picker *::after {
+    animation: none !important;
+  }
+
+  .fv-claude-code-gui-picker .fv-cp-caret {
+    display: none;
+  }
+}

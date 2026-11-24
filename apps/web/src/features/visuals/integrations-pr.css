@@ -1,0 +1,539 @@
+.fv-integrations-pr {
+  --ipr-loop: 8s;
+  --ipr-merged: oklch(0.55 0.17 300);
+
+  background:
+    radial-gradient(55% 60% at 85% 0%, rgb(140 200 160 / 0.07), transparent),
+    var(--fv-canvas);
+}
+
+.dark .fv-integrations-pr {
+  --ipr-merged: oklch(0.72 0.14 300);
+}
+
+.fv-integrations-pr .fv-ipr-icon {
+  flex: none;
+  width: 1.05em;
+  height: 1.05em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-integrations-pr .fv-ipr-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  height: 3.4em;
+  padding: 0 1.4em;
+  border-bottom: 1px solid var(--fv-seam);
+  background: var(--fv-chrome);
+  white-space: nowrap;
+}
+
+.fv-integrations-pr .fv-ipr-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7em;
+  min-width: 0;
+  margin-right: auto;
+  overflow: hidden;
+}
+
+.fv-integrations-pr .fv-ipr-title .fv-dim {
+  font-size: 0.86em;
+}
+
+.fv-integrations-pr .fv-ipr-git,
+.fv-integrations-pr .fv-ipr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 2.1em;
+  padding: 0 0.75em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.55em;
+  font-size: 0.9em;
+}
+
+.fv-integrations-pr .fv-ipr-git {
+  border-color: color-mix(in oklch, var(--fv-ink) 30%, var(--fv-canvas));
+  background: var(--fv-raise);
+}
+
+.fv-integrations-pr .fv-ipr-tally i {
+  font-style: normal;
+  color: var(--fv-ok);
+}
+
+.fv-integrations-pr .fv-ipr-tally s {
+  text-decoration: none;
+  color: var(--fv-bad);
+}
+
+.fv-integrations-pr .fv-ipr-sync {
+  color: var(--fv-soft);
+}
+
+.fv-integrations-pr .fv-ipr-status {
+  position: relative;
+  display: inline-grid;
+}
+
+.fv-integrations-pr .fv-ipr-state {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  white-space: nowrap;
+  opacity: 0;
+  animation: var(--ipr-loop) ease-in-out infinite both;
+}
+
+.fv-integrations-pr .fv-ipr-state.is-run {
+  color: var(--fv-attn-text);
+  opacity: 1;
+  animation-name: fv-ipr-run;
+}
+
+.fv-integrations-pr .fv-ipr-state.is-ready {
+  color: var(--fv-ok);
+  animation-name: fv-ipr-ready;
+}
+
+.fv-integrations-pr .fv-ipr-state.is-merged {
+  color: var(--ipr-merged);
+  animation-name: fv-ipr-merged;
+}
+
+.fv-integrations-pr .fv-ipr-badge .fv-ipr-status {
+  min-width: 8.4em;
+}
+
+.fv-integrations-pr .fv-ipr-log {
+  position: absolute;
+  top: 5em;
+  left: 1.6em;
+  width: 14.5em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9em;
+  font-size: 0.95em;
+}
+
+.fv-integrations-pr .fv-ipr-you {
+  align-self: flex-start;
+  padding: 0.5em 0.9em;
+  border-radius: 0.9em;
+  background: var(--fv-select);
+}
+
+.fv-integrations-pr .fv-ipr-panel {
+  position: absolute;
+  top: 3.9em;
+  right: 1.2em;
+  width: 21.5em;
+  padding: 0.9em 1em 1em;
+  border-color: var(--fv-hair);
+  background: var(--fv-chrome);
+  box-shadow: 0 1.4em 3em -1em var(--fv-shade);
+}
+
+.dark .fv-integrations-pr .fv-ipr-panel {
+  box-shadow: 0 1.4em 3em -1em rgb(0 0 0 / 0.6);
+}
+
+.fv-integrations-pr .fv-ipr-group {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  margin-bottom: 0.35em;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fv-soft);
+}
+
+.fv-integrations-pr .fv-ipr-group .fv-dim {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.fv-integrations-pr .fv-ipr-files {
+  margin-bottom: 0.8em;
+}
+
+.fv-integrations-pr .fv-ipr-files li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.28em 0;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.fv-integrations-pr .fv-ipr-files b {
+  font-weight: 520;
+}
+
+.fv-integrations-pr .fv-ipr-files i {
+  margin-left: auto;
+  font-family: var(--fv-mono);
+  font-size: 0.9em;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.fv-integrations-pr .fv-ipr-files .is-attn {
+  color: var(--fv-attn-text);
+}
+
+.fv-integrations-pr .fv-ipr-files .is-ok {
+  color: var(--fv-ok);
+}
+
+.fv-integrations-pr .fv-ipr-card {
+  position: relative;
+  display: grid;
+  gap: 0.55em;
+  margin-top: 0.5em;
+  padding: 0.8em 0.9em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.7em;
+  background: var(--fv-raise);
+  font-size: 0.92em;
+}
+
+.fv-integrations-pr .fv-ipr-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  white-space: nowrap;
+}
+
+.fv-integrations-pr .fv-ipr-card-head b {
+  font-weight: 560;
+}
+
+.fv-integrations-pr .fv-ipr-checks {
+  display: flex;
+  gap: 0.9em;
+  font-size: 0.86em;
+  color: var(--fv-soft);
+  white-space: nowrap;
+}
+
+.fv-integrations-pr .fv-ipr-checks li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.fv-integrations-pr .fv-ipr-checks i {
+  position: relative;
+  width: 0.62em;
+  height: 0.62em;
+  border-radius: 50%;
+  background: var(--fv-attn);
+}
+
+.fv-integrations-pr .fv-ipr-checks i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--fv-ok);
+  animation: var(--ipr-loop) ease-out infinite both;
+}
+
+.fv-integrations-pr .is-c1 i::after {
+  animation-name: fv-ipr-check-1;
+}
+
+.fv-integrations-pr .is-c2 i::after {
+  animation-name: fv-ipr-check-2;
+}
+
+.fv-integrations-pr .is-c3 i::after {
+  animation-name: fv-ipr-check-3;
+}
+
+.fv-integrations-pr .fv-ipr-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  margin-top: 0.8em;
+  padding-top: 0.75em;
+  border-top: 1px solid var(--fv-seam);
+  font-size: 0.86em;
+  white-space: nowrap;
+}
+
+.fv-integrations-pr .fv-ipr-foot b {
+  font-weight: 500;
+  color: var(--fv-ink);
+}
+
+.fv-integrations-pr .fv-ipr-merge {
+  position: absolute;
+  top: 0.65em;
+  right: 0.9em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.3em 0.55em 0.3em 0.8em;
+  border-radius: 0.45em;
+  background: var(--fv-ink);
+  color: var(--fv-canvas);
+  font-weight: 600;
+  animation: fv-ipr-merge var(--ipr-loop) ease-out infinite both;
+}
+
+.fv-integrations-pr .fv-ipr-merge svg {
+  width: 0.95em;
+  height: 0.95em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-integrations-pr .fv-ipr-cursor {
+  position: absolute;
+  top: 16.6em;
+  right: 2.6em;
+  width: 1.3em;
+  height: 1.6em;
+  fill: var(--fv-ink);
+  stroke: var(--fv-canvas);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0.15em 0.3em rgb(0 0 0 / 0.5));
+  opacity: 0;
+  animation: fv-ipr-cursor var(--ipr-loop) cubic-bezier(0.45, 0, 0.2, 1)
+    infinite both;
+}
+
+@keyframes fv-ipr-run {
+  0%,
+  33% {
+    opacity: 1;
+  }
+
+  36%,
+  95% {
+    opacity: 0;
+  }
+
+  98%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-ipr-ready {
+  0%,
+  33% {
+    opacity: 0;
+  }
+
+  36%,
+  64% {
+    opacity: 1;
+  }
+
+  67%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ipr-merged {
+  0%,
+  64% {
+    opacity: 0;
+  }
+
+  67%,
+  95% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ipr-check-1 {
+  0%,
+  9% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+
+  12%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ipr-check-2 {
+  0%,
+  20% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+
+  23%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ipr-check-3 {
+  0%,
+  31% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+
+  34%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ipr-merge {
+  0%,
+  33% {
+    opacity: 0.35;
+    transform: none;
+  }
+
+  36%,
+  51% {
+    opacity: 1;
+    transform: none;
+  }
+
+  53% {
+    opacity: 1;
+    transform: scale(0.92);
+  }
+
+  56%,
+  62% {
+    opacity: 1;
+    transform: none;
+  }
+
+  66%,
+  95% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  98%,
+  100% {
+    opacity: 0.35;
+    transform: none;
+  }
+}
+
+@keyframes fv-ipr-cursor {
+  0%,
+  30% {
+    opacity: 0;
+    transform: translate(5em, 5em);
+  }
+
+  36% {
+    opacity: 1;
+    transform: translate(3.5em, 3.6em);
+  }
+
+  48%,
+  51% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+
+  53% {
+    opacity: 1;
+    transform: translate(0, 0) scale(0.88);
+  }
+
+  56%,
+  70% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+
+  80%,
+  100% {
+    opacity: 0;
+    transform: translate(-3em, 4em);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-integrations-pr *,
+  .fv-integrations-pr *::before,
+  .fv-integrations-pr *::after {
+    animation: none !important;
+  }
+
+  .fv-integrations-pr .fv-ipr-state.is-run {
+    opacity: 0;
+  }
+
+  .fv-integrations-pr .fv-ipr-state.is-ready {
+    opacity: 1;
+  }
+
+  .fv-integrations-pr .fv-ipr-cursor {
+    opacity: 0;
+  }
+}
+
+@container (max-width: 520px) {
+  .fv-integrations-pr .fv-ipr-title,
+  .fv-integrations-pr .fv-ipr-log {
+    display: none;
+  }
+
+  .fv-integrations-pr .fv-ipr-git {
+    margin-left: auto;
+  }
+
+  .fv-integrations-pr .fv-ipr-panel {
+    left: 1.2em;
+    width: auto;
+  }
+}

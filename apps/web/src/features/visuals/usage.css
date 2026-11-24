@@ -1,0 +1,889 @@
+@property --fv-usage-left {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 23;
+}
+
+@property --fv-usage-ring {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 23;
+}
+
+.fv.fv-usage {
+  --u-subtle: oklch(0.55 0.01 268);
+  --u-claude: oklch(0.64 0.14 42);
+  --u-bad: oklch(0.56 0.19 22);
+  --u-warn: oklch(0.65 0.16 50);
+  --u-lift: color-mix(in oklab, var(--fv-ink) 22%, transparent);
+  --u-lift-near: color-mix(in oklab, var(--fv-ink) 16%, transparent);
+  --u-loop: 8s;
+
+  font-size: 2.08cqw;
+  background: var(--fv-chrome);
+}
+
+.dark .fv.fv-usage {
+  --u-subtle: oklch(0.68 0.008 267);
+  --u-claude: oklch(0.7 0.13 42);
+  --u-warn: oklch(0.75 0.16 50);
+  --u-lift: rgb(0 0 0 / 0.7);
+  --u-lift-near: rgb(0 0 0 / 0.5);
+}
+
+.fv-usage .fv-usage-main {
+  position: absolute;
+  top: -1em;
+  left: -1em;
+  right: -1em;
+  bottom: 2.7em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.95em;
+  background: var(--fv-canvas);
+}
+
+.fv-usage .fv-usage-thread {
+  position: absolute;
+  left: 3em;
+  bottom: 1.3em;
+  display: grid;
+  gap: 0.9em;
+  width: 25em;
+}
+
+.fv-usage .fv-usage-earlier {
+  display: none;
+}
+
+.fv-usage .fv-usage-say,
+.fv-usage .fv-usage-earlier {
+  color: var(--fv-ink);
+  line-height: 1.6;
+}
+
+.fv-usage .fv-usage-tools {
+  font-size: 0.92em;
+  color: var(--u-subtle);
+}
+
+.fv-usage .fv-usage-composer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  height: 5.2em;
+  margin-top: 0.4em;
+  padding: 0.9em 0.7em 0.7em 1.1em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 1.1em;
+  background: var(--fv-raise);
+  color: var(--u-subtle);
+}
+
+.fv-usage .fv-usage-composer span {
+  align-self: flex-start;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-usage .fv-usage-composer i {
+  flex: none;
+  width: 2em;
+  height: 2em;
+  border-radius: 50%;
+  background: var(--fv-select);
+}
+
+.fv-usage .fv-usage-bar {
+  position: absolute;
+  left: 0.7em;
+  right: 0.7em;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  height: 2.7em;
+  font-size: 0.92em;
+  color: var(--fv-soft);
+  white-space: nowrap;
+}
+
+.fv-usage .fv-usage-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  margin-left: 3em;
+  padding: 0.3em 0.85em;
+  border-radius: 99em;
+  background: var(--fv-raise);
+}
+
+.fv-usage .fv-usage-activity b {
+  color: var(--fv-ink);
+  font-weight: 600;
+}
+
+.fv-usage .fv-usage-sep {
+  width: 1px;
+  height: 0.9em;
+  margin: 0 0.35em;
+  background: var(--fv-hair);
+}
+
+.fv-usage .fv-usage-rings {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.95em;
+  margin-left: auto;
+  padding: 0.3em 0.6em;
+  border-radius: 0.5em;
+  background: color-mix(in oklab, var(--fv-ink) 22.5%, transparent);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-usage .fv-usage-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  color: var(--fv-soft);
+}
+
+.fv-usage .fv-usage-ring small {
+  margin-left: 0.05em;
+  font-size: 1em;
+  color: var(--u-subtle);
+}
+
+.fv-usage .fv-usage-gauge {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 1.5em;
+  height: 1.5em;
+}
+
+.fv-usage .fv-usage-gauge svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  transform: rotate(-90deg);
+}
+
+.fv-usage .fv-usage-track {
+  stroke: color-mix(in oklab, var(--fv-ink) 15%, transparent);
+  stroke-width: 1.75;
+}
+
+.fv-usage .fv-usage-arc {
+  stroke: var(--fv-soft);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+}
+
+.fv-usage .fv-usage-gauge .fv-usage-mark {
+  position: relative;
+  width: 0.78em;
+  height: 0.78em;
+  opacity: 0.85;
+}
+
+.fv-usage .fv-usage-mark {
+  flex: none;
+  fill: none;
+  stroke-linecap: round;
+}
+
+.fv-usage .fv-usage-mark--claude {
+  stroke: var(--u-claude);
+  stroke-width: 1.9;
+}
+
+.fv-usage .fv-usage-mark--codex {
+  stroke: var(--fv-ink);
+  stroke-width: 1.1;
+}
+
+.fv-usage .fv-usage-icons {
+  display: inline-flex;
+  gap: 0.75em;
+}
+
+.fv-usage .fv-usage-icons svg {
+  width: 1.15em;
+  height: 1.15em;
+  fill: none;
+  stroke: var(--fv-soft);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-usage .fv-usage-icons svg:nth-child(2) {
+  stroke-width: 2.2;
+}
+
+.fv-usage .fv-usage-pop {
+  position: absolute;
+  right: 5.75em;
+  bottom: 3.3em;
+  width: 27em;
+  overflow: hidden;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.95em;
+  background: var(--fv-side);
+  box-shadow:
+    0 1.4em 3em -0.8em var(--u-lift),
+    0 0.3em 0.8em -0.3em var(--u-lift-near);
+}
+
+.fv-usage .fv-usage-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  height: 2.5em;
+  padding: 0 0.5em 0 0.95em;
+  border-bottom: 1px solid var(--fv-hair);
+}
+
+.fv-usage .fv-usage-head b {
+  font-size: 0.92em;
+  font-weight: 600;
+}
+
+.fv-usage .fv-usage-head span {
+  flex: 1;
+  font-size: 0.78em;
+  color: var(--u-subtle);
+}
+
+.fv-usage .fv-usage-head svg {
+  width: 1.1em;
+  height: 1.1em;
+  margin-right: 0.35em;
+  fill: none;
+  stroke: var(--fv-soft);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-usage .fv-usage-body {
+  display: grid;
+  gap: 0.25em;
+  padding: 0.3em 0.3em 0.4em;
+}
+
+.fv-usage .fv-usage-group h4 {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.5em 0.6em 0.3em;
+  font-size: 0.92em;
+  font-weight: 500;
+}
+
+.fv-usage .fv-usage-group h4 .fv-usage-mark {
+  width: 1.15em;
+  height: 1.15em;
+}
+
+.fv-usage .fv-usage-group h4 small {
+  margin-left: auto;
+  font-size: 0.85em;
+  font-weight: 400;
+  color: var(--u-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-usage .fv-usage-group li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 0.46em minmax(0, 1fr) 4.9em 2.9em 4.1em;
+  align-items: center;
+  gap: 0 0.62em;
+  padding: 0.42em 0.6em;
+  border-radius: 0.45em;
+}
+
+.fv-usage .fv-usage-group li.is-next::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--fv-ok) 10%, transparent);
+  opacity: 0;
+}
+
+.fv-usage .fv-usage-group li > * {
+  position: relative;
+}
+
+.fv-usage .fv-usage-status {
+  width: 0.46em;
+  height: 0.46em;
+  border-radius: 50%;
+  background: var(--fv-ok);
+}
+
+.fv-usage .fv-usage-status::before,
+.fv-usage .fv-usage-status::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.fv-usage .fv-usage-status::before {
+  box-shadow: 0 0 0 0.23em color-mix(in oklab, var(--fv-ok) 25%, transparent);
+  opacity: 0;
+}
+
+.fv-usage :is(.is-serving, .is-draining) .fv-usage-status::before {
+  opacity: 1;
+}
+
+.fv-usage .fv-usage-status::after {
+  background: var(--u-bad);
+  opacity: 0;
+}
+
+.fv-usage .fv-usage-name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.92em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.fv-usage .fv-usage-name small {
+  font-size: 0.85em;
+  font-weight: 400;
+  color: var(--u-subtle);
+}
+
+.fv-usage .fv-usage-meter {
+  position: relative;
+  display: block;
+  height: 0.46em;
+  border-radius: 99em;
+  background: color-mix(in oklab, var(--fv-ink) 12%, transparent);
+}
+
+.fv-usage .fv-usage-fill {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.fv-usage .fv-usage-fill i {
+  position: absolute;
+  inset: 0;
+  border-radius: 99em;
+  background: var(--fv-ok);
+}
+
+.fv-usage .fv-usage-fill i::before,
+.fv-usage .fv-usage-fill i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+}
+
+.fv-usage .fv-usage-fill i::before {
+  background: var(--u-warn);
+}
+
+.fv-usage .fv-usage-fill i::after {
+  background: var(--u-bad);
+}
+
+.fv-usage .fv-usage-meter b {
+  position: absolute;
+  top: -0.23em;
+  bottom: -0.23em;
+  width: 1px;
+  margin-left: -0.5px;
+  border-radius: 99em;
+  background: color-mix(in oklab, var(--fv-ink) 45%, transparent);
+}
+
+.fv-usage .fv-usage-value {
+  font-size: 0.92em;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-usage .is-draining .fv-usage-value {
+  counter-reset: fv-usage-left var(--fv-usage-left);
+}
+
+.fv-usage .is-draining .fv-usage-value::before {
+  content: counter(fv-usage-left) "%";
+}
+
+.fv-usage .fv-usage-note {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.2em;
+  font-size: 0.78em;
+  color: var(--u-subtle);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-usage .fv-usage-note svg {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  opacity: 0;
+}
+
+.fv-usage li:not(.is-draining) .fv-usage-note svg {
+  display: none;
+}
+
+.fv-usage .fv-usage-ready {
+  display: inline-grid;
+}
+
+.fv-usage .fv-usage-ready > span {
+  grid-area: 1 / 1;
+  text-align: right;
+}
+
+.fv-usage .fv-usage-ready > .is-after {
+  opacity: 0;
+}
+
+.fv-usage .fv-usage-ring.is-codex .fv-usage-ring-value {
+  counter-reset: fv-usage-ring var(--fv-usage-ring);
+}
+
+.fv-usage .fv-usage-ring.is-codex .fv-usage-ring-value::before {
+  content: counter(fv-usage-ring);
+}
+
+.fv-usage .fv-usage-running {
+  justify-self: start;
+  background: linear-gradient(
+      90deg,
+      var(--u-subtle) 0%,
+      var(--u-subtle) 35%,
+      var(--fv-ink) 50%,
+      var(--u-subtle) 65%,
+      var(--u-subtle) 100%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.fv-usage .is-draining .fv-usage-fill i,
+.fv-usage .is-draining .fv-usage-fill i::before,
+.fv-usage .is-draining .fv-usage-fill i::after,
+.fv-usage .is-draining .fv-usage-value,
+.fv-usage .is-draining .fv-usage-note,
+.fv-usage .is-draining .fv-usage-note svg,
+.fv-usage .is-draining .fv-usage-status::before,
+.fv-usage .is-draining .fv-usage-status::after,
+.fv-usage .is-next .fv-usage-status::before,
+.fv-usage .fv-usage-group li.is-next::before,
+.fv-usage .fv-usage-ready > span,
+.fv-usage .fv-usage-ring.is-codex .fv-usage-arc,
+.fv-usage .fv-usage-ring.is-codex .fv-usage-ring-value {
+  animation: var(--u-loop) var(--fv-swap) infinite both;
+}
+
+.fv-usage .fv-usage-running {
+  animation: fv-usage-shimmer 1.6s linear infinite;
+}
+
+.fv-usage .is-draining .fv-usage-fill i {
+  animation-name: fv-usage-drain;
+}
+
+.fv-usage .is-draining .fv-usage-fill i::before {
+  animation-name: fv-usage-low;
+}
+
+.fv-usage .is-draining .fv-usage-fill i::after {
+  animation-name: fv-usage-critical;
+}
+
+.fv-usage .is-draining .fv-usage-value {
+  animation-name: fv-usage-left;
+}
+
+.fv-usage .is-draining .fv-usage-note {
+  animation-name: fv-usage-note;
+}
+
+.fv-usage .is-draining .fv-usage-note svg,
+.fv-usage .is-draining .fv-usage-status::after,
+.fv-usage .is-next .fv-usage-status::before,
+.fv-usage .fv-usage-ready > .is-after {
+  animation-name: fv-usage-spent;
+}
+
+.fv-usage .is-draining .fv-usage-status::before,
+.fv-usage .fv-usage-ready > .is-before {
+  animation-name: fv-usage-ready;
+}
+
+.fv-usage .fv-usage-group li.is-next::before {
+  animation-name: fv-usage-takeover;
+}
+
+.fv-usage .fv-usage-ring.is-codex .fv-usage-arc {
+  animation-name: fv-usage-arc;
+}
+
+.fv-usage .fv-usage-ring.is-codex .fv-usage-ring-value {
+  animation-name: fv-usage-ring;
+}
+
+.fv-usage .is-draining :is(.fv-usage-fill i, .fv-usage-value),
+.fv-usage .fv-usage-ring.is-codex :is(.fv-usage-arc, .fv-usage-ring-value) {
+  animation-timing-function: linear;
+}
+
+@keyframes fv-usage-drain {
+  0%,
+  8% {
+    transform: translateX(-77%);
+  }
+
+  46%,
+  90% {
+    transform: translateX(-98%);
+  }
+
+  97%,
+  100% {
+    transform: translateX(-77%);
+  }
+}
+
+@keyframes fv-usage-low {
+  0%,
+  13.4% {
+    opacity: 0;
+  }
+
+  14.4%,
+  90% {
+    opacity: 1;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-usage-critical {
+  0%,
+  40.6% {
+    opacity: 0;
+  }
+
+  41.6%,
+  47% {
+    opacity: 1;
+  }
+
+  49%,
+  90% {
+    opacity: 0.45;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-usage-left {
+  0%,
+  8% {
+    --fv-usage-left: 23;
+    color: var(--fv-ink);
+  }
+
+  13.4% {
+    color: var(--fv-ink);
+  }
+
+  14.4% {
+    color: var(--u-warn);
+  }
+
+  40.6% {
+    color: var(--u-warn);
+  }
+
+  41.6% {
+    color: var(--fv-bad);
+  }
+
+  46% {
+    --fv-usage-left: 2;
+  }
+
+  47% {
+    color: var(--fv-bad);
+  }
+
+  49%,
+  90% {
+    --fv-usage-left: 2;
+    color: var(--u-subtle);
+  }
+
+  97%,
+  100% {
+    --fv-usage-left: 23;
+    color: var(--fv-ink);
+  }
+}
+
+@keyframes fv-usage-note {
+  0%,
+  47% {
+    color: var(--u-subtle);
+  }
+
+  49%,
+  90% {
+    color: var(--fv-ink);
+  }
+
+  95%,
+  100% {
+    color: var(--u-subtle);
+  }
+}
+
+@keyframes fv-usage-spent {
+  0%,
+  47% {
+    opacity: 0;
+  }
+
+  49%,
+  90% {
+    opacity: 1;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-usage-ready {
+  0%,
+  47% {
+    opacity: 1;
+  }
+
+  49%,
+  90% {
+    opacity: 0;
+  }
+
+  95%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-usage-takeover {
+  0%,
+  47.5% {
+    opacity: 0;
+  }
+
+  51% {
+    opacity: 1;
+  }
+
+  66%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-usage-arc {
+  0%,
+  8% {
+    stroke-dashoffset: 77;
+    stroke: var(--fv-soft);
+  }
+
+  13.4% {
+    stroke: var(--fv-soft);
+  }
+
+  14.4% {
+    stroke: var(--u-warn);
+  }
+
+  40.6% {
+    stroke: var(--u-warn);
+  }
+
+  41.6% {
+    stroke: var(--u-bad);
+  }
+
+  46%,
+  47.5% {
+    stroke-dashoffset: 98;
+    stroke: var(--u-bad);
+  }
+
+  49.5%,
+  90% {
+    stroke-dashoffset: 24;
+    stroke: var(--fv-soft);
+  }
+
+  97%,
+  100% {
+    stroke-dashoffset: 77;
+    stroke: var(--fv-soft);
+  }
+}
+
+@keyframes fv-usage-ring {
+  0%,
+  8% {
+    --fv-usage-ring: 23;
+  }
+
+  46%,
+  47.5% {
+    --fv-usage-ring: 2;
+  }
+
+  49.5%,
+  90% {
+    --fv-usage-ring: 76;
+  }
+
+  97%,
+  100% {
+    --fv-usage-ring: 23;
+  }
+}
+
+@keyframes fv-usage-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-usage *,
+  .fv-usage *::before,
+  .fv-usage *::after {
+    animation: none !important;
+  }
+}
+
+.fv-usage .fv-usage-speed {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  margin-top: 0.2em;
+  padding: 0.6em 0.6em 0.3em;
+  border-top: 1px solid var(--fv-hair);
+  font-size: 0.92em;
+}
+
+.fv-usage .fv-usage-speed span {
+  font-size: 0.7em;
+  color: var(--fv-soft);
+}
+
+.fv-usage .fv-usage-speed b {
+  font-weight: 500;
+}
+
+.fv-usage .fv-usage-speed small {
+  margin-left: auto;
+  font-size: 0.85em;
+  color: var(--u-subtle);
+}
+
+@container (max-width: 699px) {
+  .fv-usage .fv-usage-thread {
+    width: calc(100% - 37.75em);
+  }
+}
+
+@container (min-width: 700px) {
+  .fv-usage .fv-usage-earlier {
+    display: block;
+  }
+
+  .fv-usage .fv-usage-ask {
+    justify-self: end;
+    max-width: 22em;
+    padding: 0.55em 0.9em;
+    border-radius: 0.9em;
+    background: var(--fv-select);
+  }
+
+  .fv-usage .fv-usage-earlier.fv-usage-tools {
+    margin-bottom: 1em;
+  }
+}
+
+@container (max-width: 440px) {
+  .fv.fv-usage {
+    font-size: 2.42cqw;
+  }
+
+  .fv-usage .fv-usage-icons,
+  .fv-usage .fv-usage-speed {
+    display: none;
+  }
+
+  .fv-usage .fv-usage-activity {
+    margin-left: 0.4em;
+  }
+
+  .fv-usage .fv-usage-pop {
+    right: 0.7em;
+  }
+
+  .fv-usage .fv-usage-thread {
+    width: calc(100% - 32.7em);
+  }
+
+  .fv-usage .fv-usage-say {
+    display: none;
+  }
+}

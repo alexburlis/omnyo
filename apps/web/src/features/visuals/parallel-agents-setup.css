@@ -1,0 +1,375 @@
+.fv.fv-parallel-agents-setup {
+  --ps-loop: 8s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-parallel-agents-setup .fv-ps-log {
+  position: absolute;
+  top: 0.9em;
+  left: 0.9em;
+  bottom: 0.9em;
+  width: 19.4em;
+  display: flex;
+  flex-direction: column;
+  padding: 0.8em 1em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-canvas);
+}
+
+.fv-parallel-agents-setup .fv-ps-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6em;
+  font-size: 0.86em;
+}
+
+.fv-parallel-agents-setup .fv-ps-title b {
+  font-weight: 600;
+}
+
+.fv-parallel-agents-setup .fv-ps-title span {
+  font-family: var(--fv-mono);
+  font-size: 0.86em;
+  color: var(--fv-dim);
+}
+
+.fv-parallel-agents-setup .fv-ps-step {
+  display: grid;
+  grid-template-columns: 1.3em 1fr;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.22em 0;
+  font-size: 0.82em;
+}
+
+.fv-parallel-agents-setup .fv-ps-step svg {
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: var(--fv-ok);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-parallel-agents-setup .fv-ps-step code {
+  font-family: var(--fv-mono);
+  font-size: 0.92em;
+  color: var(--fv-soft);
+}
+
+.fv-parallel-agents-setup .fv-ps-out {
+  margin: 0.1em 0 0.25em 1.8em;
+  padding: 0.35em 0.6em;
+  border-radius: 0.45em;
+  background: var(--fv-chrome);
+  font-family: var(--fv-mono);
+  font-size: 0.7em;
+  line-height: 1.6;
+  color: var(--fv-dim);
+}
+
+.fv-parallel-agents-setup .fv-ps-agent {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  margin-top: auto;
+  padding: 0.45em 0.7em;
+  border-radius: 0.6em;
+  background: color-mix(in oklab, var(--fv-info) 14%, transparent);
+  font-size: 0.82em;
+  color: var(--fv-info);
+}
+
+.fv-parallel-agents-setup .fv-ps-side {
+  position: absolute;
+  top: 0.9em;
+  left: 21.2em;
+  right: 0.9em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+}
+
+.fv-parallel-agents-setup .fv-ps-file {
+  padding: 0.6em 0.8em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.8em;
+  background: var(--fv-canvas);
+}
+
+.fv-parallel-agents-setup .fv-ps-file p {
+  margin-bottom: 0.35em;
+  font-family: var(--fv-mono);
+  font-size: 0.72em;
+  color: var(--fv-dim);
+}
+
+.fv-parallel-agents-setup .fv-ps-file pre {
+  margin: 0;
+  font-family: var(--fv-mono);
+  font-size: 0.76em;
+  line-height: 1.65;
+  color: var(--fv-soft);
+  white-space: pre;
+}
+
+.fv-parallel-agents-setup .fv-ps-file pre i {
+  font-style: normal;
+  color: var(--fv-dim);
+}
+
+.fv-parallel-agents-setup .fv-ps-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  font-family: var(--fv-mono);
+  font-size: 0.72em;
+}
+
+.fv-parallel-agents-setup .fv-ps-copy span {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.25em 0.5em;
+  border-radius: 0.4em;
+  background: var(--fv-raise);
+}
+
+.fv-parallel-agents-setup .fv-ps-copy span::before {
+  content: "→";
+  color: var(--fv-ok);
+}
+
+.fv-parallel-agents-setup
+  :where(.fv-ps-step, .fv-ps-out, .fv-ps-agent, .fv-ps-copy span) {
+  animation: var(--ps-loop) var(--fv-swap) infinite both;
+}
+
+.fv-parallel-agents-setup .fv-ps-step:nth-of-type(1) {
+  animation-name: fv-ps-in-0;
+}
+
+.fv-parallel-agents-setup .fv-ps-step:nth-of-type(2) {
+  animation-name: fv-ps-in-1;
+}
+
+.fv-parallel-agents-setup .fv-ps-step:nth-of-type(3) {
+  animation-name: fv-ps-in-2;
+}
+
+.fv-parallel-agents-setup .fv-ps-copy span:nth-child(1) {
+  animation-name: fv-ps-in-3;
+}
+
+.fv-parallel-agents-setup .fv-ps-copy span:nth-child(2) {
+  animation-name: fv-ps-in-4;
+}
+
+.fv-parallel-agents-setup .fv-ps-step:nth-of-type(4) {
+  animation-name: fv-ps-in-5;
+}
+
+.fv-parallel-agents-setup .fv-ps-out {
+  animation-name: fv-ps-in-6;
+}
+
+.fv-parallel-agents-setup .fv-ps-step:nth-of-type(5) {
+  animation-name: fv-ps-in-7;
+}
+
+.fv-parallel-agents-setup .fv-ps-agent {
+  animation-name: fv-ps-in-8;
+}
+
+@keyframes fv-ps-in-0 {
+  0%,
+  4% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  9%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ps-in-1 {
+  0%,
+  10% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  15%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ps-in-2 {
+  0%,
+  16% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  21%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ps-in-3 {
+  0%,
+  20% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  25%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ps-in-4 {
+  0%,
+  23% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  28%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ps-in-5 {
+  0%,
+  28% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  33%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ps-in-6 {
+  0%,
+  34% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  39%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ps-in-7 {
+  0%,
+  46% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  51%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ps-in-8 {
+  0%,
+  54% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  59%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-parallel-agents-setup *,
+  .fv-parallel-agents-setup *::before,
+  .fv-parallel-agents-setup *::after {
+    animation: none !important;
+  }
+}

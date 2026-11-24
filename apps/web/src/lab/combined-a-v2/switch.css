@@ -1,0 +1,800 @@
+.lab-combined-a-v2 .switch {
+  --switch-surface: color-mix(in oklab, var(--bg) 55%, white);
+}
+
+.dark .lab-combined-a-v2 .switch {
+  --switch-surface: color-mix(in oklab, var(--fg) 6%, var(--bg));
+}
+
+.dark .lab-combined-a-v2 .switch-roll-name {
+  color: color-mix(in oklab, var(--h-text) 78%, white);
+}
+
+.lab-combined-a-v2 .switch .band-head .switch-title {
+  max-width: none;
+  text-wrap: wrap;
+}
+
+.lab-combined-a-v2 .switch-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.lab-combined-a-v2 .harness-tile {
+  --tile: 22px;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--tile);
+  height: var(--tile);
+  border-radius: calc(var(--tile) * 0.27);
+  background: var(--h-brand);
+  color: var(--h-on);
+}
+
+.lab-combined-a-v2 .harness-tile svg {
+  display: block;
+  width: 64%;
+  height: 64%;
+}
+
+.lab-combined-a-v2 .switch-roll {
+  display: inline-grid;
+  justify-items: start;
+  white-space: nowrap;
+  clip-path: inset(0.02em -0.12em 0 -0.06em);
+}
+
+.lab-combined-a-v2 .switch-roll > * {
+  grid-area: 1 / 1;
+}
+
+.lab-combined-a-v2 .switch-roll-size {
+  visibility: hidden;
+}
+
+.lab-combined-a-v2 .switch-roll-name {
+  color: var(--h-text);
+}
+
+.lab-combined-a-v2 .switch-roll-char {
+  display: inline-block;
+}
+
+.lab-combined-a-v2 .switch-roll-tile {
+  --tile: 0.78em;
+  margin-right: 0.2em;
+  vertical-align: -0.02em;
+}
+
+.lab-combined-a-v2 .switch-roll-name.is-in .switch-roll-char {
+  animation: switch-roll-in 0.7s var(--ease) both;
+  animation-delay: calc(var(--i) * 22ms + 200ms);
+}
+
+.lab-combined-a-v2 .switch-roll-name.is-out .switch-roll-char {
+  animation: switch-roll-out 0.34s cubic-bezier(0.55, 0, 0.8, 0.2) both;
+  animation-delay: calc(var(--i) * 12ms);
+}
+
+@keyframes switch-roll-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.7em);
+  }
+  30% {
+    opacity: 0;
+  }
+  70% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes switch-roll-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  35% {
+    opacity: 0;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-0.7em);
+  }
+}
+
+.lab-combined-a-v2 .switch-roll-static {
+  display: none;
+}
+
+.lab-combined-a-v2 .switch-static-name {
+  color: var(--h-text);
+}
+
+.lab-combined-a-v2 .switch-stage {
+  --row: 40px;
+  --visible: 4;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 56px minmax(0, 1fr);
+  grid-template-areas: "picker source flow omnyo";
+  align-items: stretch;
+  gap: 0 clamp(12px, 1.4vw, 20px);
+}
+
+.lab-combined-a-v2 .switch-picker {
+  grid-area: picker;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.lab-combined-a-v2 .switch-chip {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 33px;
+  padding: 0 12px 0 7px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color 0.25s var(--ease),
+    background-color 0.25s var(--ease),
+    border-color 0.25s var(--ease);
+}
+
+.lab-combined-a-v2 .switch-chip:hover {
+  color: var(--fg);
+}
+
+.lab-combined-a-v2 .switch-chip[aria-pressed="true"] {
+  border-color: color-mix(in oklab, var(--h-brand) 45%, transparent);
+  background: var(--switch-surface);
+  color: var(--fg);
+}
+
+.lab-combined-a-v2 .switch-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.lab-combined-a-v2 .switch-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 14px 14px 16px;
+  border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
+  border-radius: 20px;
+  background: var(--switch-surface);
+}
+
+.lab-combined-a-v2 .switch-pane--source {
+  grid-area: source;
+}
+
+.lab-combined-a-v2 .switch-pane--omnyo {
+  grid-area: omnyo;
+}
+
+.lab-combined-a-v2 .switch-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+
+.lab-combined-a-v2 .switch-pane-head .harness-tile {
+  --tile: 28px;
+}
+
+.lab-combined-a-v2 .switch-pane--source .switch-pane-head {
+  animation: switch-fade 0.45s var(--ease) both;
+}
+
+.lab-combined-a-v2 .switch-pane-title {
+  color: var(--fg);
+  font-family: var(--display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.lab-combined-a-v2 .switch-pane-note {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.lab-combined-a-v2 .switch-omnyo-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--fg);
+}
+
+.lab-combined-a-v2 .switch-omnyo-mark svg {
+  width: 26px;
+  height: 26px;
+}
+
+.lab-combined-a-v2 .switch-source-rows,
+.lab-combined-a-v2 .switch-omnyo-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lab-combined-a-v2 .switch-source-row,
+.lab-combined-a-v2 .switch-omnyo-inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--row);
+  padding: 0 8px;
+  border-top: 1px solid color-mix(in oklab, var(--fg) 8%, transparent);
+  color: var(--fg);
+  font-size: 14.5px;
+  line-height: 1.2;
+}
+
+.lab-combined-a-v2 .switch-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.4s var(--ease);
+}
+
+.lab-combined-a-v2 .switch-row-check {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity 0.3s var(--ease),
+    transform 0.4s var(--ease);
+}
+
+.lab-combined-a-v2 .switch-check {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lab-combined-a-v2
+  .switch-stage.is-landed
+  .switch-source-row
+  .switch-row-title {
+  color: var(--muted);
+}
+
+.lab-combined-a-v2
+  .switch-stage.is-landed
+  .switch-source-row
+  .switch-row-check {
+  opacity: 1;
+  transform: none;
+  transition-delay: calc(var(--r) * 70ms);
+}
+
+.lab-combined-a-v2 .switch-source-row::after {
+  position: absolute;
+  inset: 5px 0;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--h-brand) 11%, transparent);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lab-combined-a-v2 .switch-stage.is-seen .switch-source-row {
+  animation: switch-row-enter 0.5s var(--ease) both;
+  animation-delay: calc(var(--r) * 70ms + 120ms);
+}
+
+.lab-combined-a-v2 .switch-stage.is-seen.is-landed .switch-source-row::after {
+  animation: switch-ghost 0.75s var(--ease) both;
+  animation-delay: calc(var(--r) * 70ms);
+}
+
+.lab-combined-a-v2 .switch-import {
+  display: grid;
+  place-items: center;
+  height: 40px;
+  margin-top: auto;
+  border-radius: 999px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 14px;
+  font-weight: 500;
+  transition:
+    background-color 0.35s var(--ease),
+    color 0.35s var(--ease);
+}
+
+.lab-combined-a-v2 .switch-pane--source .switch-source-rows {
+  margin-bottom: 14px;
+}
+
+.lab-combined-a-v2 .switch-import-label {
+  display: inline-flex;
+  grid-area: 1 / 1;
+  align-items: center;
+  gap: 6px;
+  transition:
+    opacity 0.25s var(--ease),
+    transform 0.35s var(--ease);
+}
+
+.lab-combined-a-v2 .switch-import-label .switch-check {
+  width: 15px;
+  height: 15px;
+}
+
+.lab-combined-a-v2 .switch-import-label--done {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.lab-combined-a-v2 .switch-stage.is-landed .switch-import {
+  background: var(--h-brand);
+  color: var(--h-on);
+}
+
+.lab-combined-a-v2 .switch-stage.is-landed .switch-import-label--idle {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+.lab-combined-a-v2 .switch-stage.is-landed .switch-import-label--done {
+  opacity: 1;
+  transform: none;
+}
+
+.lab-combined-a-v2 .switch-stage.is-running.is-pending .switch-import {
+  animation: switch-press 0.4s var(--ease) 0.85s both;
+}
+
+.lab-combined-a-v2 .switch-flow {
+  position: relative;
+  grid-area: flow;
+  display: grid;
+  place-items: center;
+}
+
+.lab-combined-a-v2 .switch-flow-line {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  border-top: 1px dashed color-mix(in oklab, var(--fg) 22%, transparent);
+}
+
+.lab-combined-a-v2 .switch-flow-arrow {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  padding: 8px;
+  border: 1px solid color-mix(in oklab, var(--fg) 14%, transparent);
+  border-radius: 50%;
+  background: var(--bg);
+  fill: none;
+  stroke: var(--fg);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lab-combined-a-v2 .switch-flow-dot {
+  position: absolute;
+  top: calc(50% - 4px);
+  left: calc(50% - 4px);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--h-brand);
+  opacity: 0;
+}
+
+.lab-combined-a-v2 .switch-stage.is-running.is-pending .switch-flow-dot {
+  animation: switch-travel 0.7s var(--ease) 1s both;
+}
+
+.lab-combined-a-v2 .switch-omnyo-rows {
+  position: relative;
+  height: calc(var(--visible) * var(--row));
+  overflow: hidden;
+}
+
+.lab-combined-a-v2 .switch-omnyo-row {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  opacity: clamp(0, var(--visible) - var(--slot), 1);
+  transform: translateY(calc(var(--slot) * var(--row)));
+  transition:
+    transform 0.65s var(--ease),
+    opacity 0.45s var(--ease);
+}
+
+.lab-combined-a-v2 .switch-omnyo-inner .switch-row-check {
+  color: var(--accent);
+  opacity: 1;
+  transform: none;
+}
+
+.lab-combined-a-v2 .switch-omnyo-inner::before {
+  position: absolute;
+  inset: 4px 0;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--h-brand) 9%, transparent);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lab-combined-a-v2 .switch-stage.is-seen .switch-omnyo-inner.is-fresh {
+  animation: switch-land 0.6s var(--ease) both;
+  animation-delay: calc(var(--r) * 80ms);
+}
+
+.lab-combined-a-v2 .switch-stage.is-seen .switch-omnyo-inner.is-fresh::before {
+  animation: switch-flash 1.4s var(--ease) both;
+  animation-delay: calc(var(--r) * 80ms);
+}
+
+.lab-combined-a-v2
+  .switch-stage.is-seen
+  .switch-omnyo-inner.is-fresh
+  .switch-row-check {
+  animation: switch-pop 0.45s var(--ease) both;
+  animation-delay: calc(var(--r) * 80ms + 0.3s);
+}
+
+.lab-combined-a-v2 .switch-omnyo-empty {
+  position: absolute;
+  inset: 54px 14px 16px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  border: 1px dashed color-mix(in oklab, var(--fg) 14%, transparent);
+  border-radius: 14px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+@keyframes switch-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes switch-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes switch-ghost {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(70%);
+  }
+}
+
+@keyframes switch-press {
+  0% {
+    transform: none;
+  }
+  45% {
+    transform: scale(0.94);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes switch-travel {
+  0% {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  30%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+@keyframes switch-land {
+  from {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes switch-flash {
+  0%,
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes switch-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.lab-combined-a-v2 .switch-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px 28px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 15.5px;
+  line-height: 1.5;
+}
+
+.lab-combined-a-v2 .switch-more a {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--fg) 30%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.25s var(--ease);
+}
+
+.lab-combined-a-v2 .switch-more a:hover {
+  text-decoration-color: currentColor;
+}
+
+.lab-combined-a-v2 .switch-more a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.lab-combined-a-v2 .switch-more .switch-more-link {
+  display: inline-flex;
+  gap: 6px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+@media (max-width: 1100px) {
+  .lab-combined-a-v2 .switch-stage {
+    grid-template-columns: minmax(0, 1fr) 52px minmax(0, 1fr);
+    grid-template-areas:
+      "picker picker picker"
+      "source flow omnyo";
+    gap: 18px clamp(10px, 1.6vw, 20px);
+  }
+
+  .lab-combined-a-v2 .switch-picker {
+    flex-flow: row wrap;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .lab-combined-a-v2 .switch-chip:not([aria-pressed="true"]) {
+    border-color: color-mix(in oklab, var(--fg) 10%, transparent);
+  }
+}
+
+@media (max-width: 680px) {
+  .lab-combined-a-v2 .switch-stage {
+    --row: 38px;
+    --visible: 3;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "picker"
+      "source"
+      "flow"
+      "omnyo";
+    gap: 0;
+  }
+
+  .lab-combined-a-v2 .switch-picker {
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: 4px;
+    margin-bottom: 14px;
+  }
+
+  .lab-combined-a-v2 .switch-chip {
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    min-height: 0;
+    padding: 0;
+  }
+
+  .lab-combined-a-v2 .switch-chip .harness-tile {
+    --tile: 26px;
+  }
+
+  .lab-combined-a-v2 .switch-chip-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .lab-combined-a-v2 .switch-flow {
+    height: 44px;
+  }
+
+  .lab-combined-a-v2 .switch-flow-line {
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    right: auto;
+    border-top: 0;
+    border-left: 1px dashed color-mix(in oklab, var(--fg) 22%, transparent);
+  }
+
+  .lab-combined-a-v2 .switch-flow-arrow {
+    width: 30px;
+    height: 30px;
+    padding: 7px;
+    transform: rotate(90deg);
+  }
+
+  .lab-combined-a-v2 .switch-stage.is-running.is-pending .switch-flow-dot {
+    animation-name: switch-travel-down;
+  }
+
+  .lab-combined-a-v2 .switch-stage.is-seen .switch-omnyo-inner.is-fresh {
+    animation-name: switch-land-down;
+  }
+
+  .lab-combined-a-v2 .switch-stage.is-seen.is-landed .switch-source-row::after {
+    animation-name: switch-ghost-down;
+  }
+
+  .lab-combined-a-v2 .switch-more {
+    font-size: 15px;
+  }
+}
+
+@keyframes switch-travel-down {
+  0% {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  30%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+}
+
+@keyframes switch-land-down {
+  from {
+    opacity: 0;
+    transform: translateY(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes switch-ghost-down {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(60%);
+  }
+}
+
+.lab-combined-a-v2.is-reduced .switch-roll {
+  display: none;
+}
+
+.lab-combined-a-v2.is-reduced .switch-roll-static {
+  display: inline;
+}
+
+.lab-combined-a-v2.is-reduced .switch-stage *,
+.lab-combined-a-v2.is-reduced .switch-stage *::before,
+.lab-combined-a-v2.is-reduced .switch-stage *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lab-combined-a-v2 .switch-roll {
+    display: none;
+  }
+
+  .lab-combined-a-v2 .switch-roll-static {
+    display: inline;
+  }
+
+  .lab-combined-a-v2 .switch-stage *,
+  .lab-combined-a-v2 .switch-stage *::before,
+  .lab-combined-a-v2 .switch-stage *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

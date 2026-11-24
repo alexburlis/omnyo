@@ -1,0 +1,565 @@
+.fv.fv-waits {
+  --w-subtle: oklch(0.55 0.01 268);
+  --w-ok: oklch(0.62 0.15 158);
+  --w-bad: oklch(0.55 0.18 22);
+  --w-loop: 8s;
+
+  font-size: max(7px, 3.75cqw);
+  background: var(--fv-chrome);
+}
+
+.dark .fv.fv-waits {
+  --w-subtle: oklch(0.68 0.008 267);
+  --w-ok: oklch(0.77 0.15 158);
+  --w-bad: oklch(0.65 0.16 22);
+}
+
+.fv-waits .fv-waits-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  height: 3em;
+  padding: 0 0.7em 0 1em;
+  white-space: nowrap;
+}
+
+.fv-waits .fv-waits-title {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  line-height: 1.25;
+}
+
+.fv-waits .fv-waits-title b {
+  font-size: 0.95em;
+  font-weight: 600;
+}
+
+.fv-waits .fv-waits-title small {
+  display: none;
+  font-size: 0.76em;
+  color: var(--w-subtle);
+}
+
+.fv-waits .fv-waits-goal {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  min-width: 0;
+  max-width: 16.5em;
+  height: 2.15em;
+  margin-left: auto;
+  padding: 0 0.6em;
+  border-radius: 0.55em;
+  font-size: 0.88em;
+}
+
+.fv-waits .fv-waits-goal svg {
+  flex: none;
+  width: 1.05em;
+  height: 1.05em;
+  fill: none;
+  stroke: var(--fv-ink);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
+.fv-waits .fv-waits-goal b {
+  flex: none;
+  font-weight: 500;
+}
+
+.fv-waits .fv-waits-objective {
+  overflow: hidden;
+  color: var(--fv-soft);
+  text-overflow: ellipsis;
+}
+
+.fv-waits .fv-waits-count {
+  display: inline-grid;
+  overflow: hidden;
+  vertical-align: bottom;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-waits .fv-waits-count > span {
+  grid-area: 1 / 1;
+}
+
+.fv-waits .fv-waits-count > .is-b {
+  opacity: 0;
+}
+
+.fv-waits .fv-waits-swap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.fv-waits .fv-waits-swap > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.fv-waits .fv-waits-swap > :not(.is-a) {
+  opacity: 0;
+}
+
+.fv-waits .fv-waits-tools > p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fv-waits .fv-waits-tools .is-run {
+  background: linear-gradient(
+      90deg,
+      var(--w-subtle) 0%,
+      var(--w-subtle) 35%,
+      var(--fv-ink) 50%,
+      var(--w-subtle) 65%,
+      var(--w-subtle) 100%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.fv-waits .fv-waits-state {
+  align-items: start;
+}
+
+.fv-waits .fv-waits-ended {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0 0.3em;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.fv-waits .fv-waits-ended svg {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: var(--w-ok);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-waits .fv-waits-ended span {
+  overflow: hidden;
+  color: var(--fv-soft);
+  text-overflow: ellipsis;
+}
+
+.fv-waits .fv-waits-ended u {
+  color: var(--fv-ink);
+  text-decoration-style: dotted;
+  text-underline-offset: 0.2em;
+}
+
+.fv-waits .fv-waits-main {
+  position: absolute;
+  top: 3em;
+  left: 0.7em;
+  right: 0.7em;
+  bottom: 0;
+  overflow: hidden;
+  border: 1px solid var(--fv-seam);
+  border-bottom: 0;
+  border-radius: 0.95em 0.95em 0 0;
+  background: var(--fv-canvas);
+}
+
+.fv-waits .fv-waits-thread {
+  position: absolute;
+  left: 1em;
+  right: 1em;
+  bottom: 0.75em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  line-height: 1.5;
+}
+
+.fv-waits .fv-waits-user {
+  display: none;
+  align-self: flex-end;
+  max-width: 80%;
+  padding: 0.5em 0.9em;
+  border-radius: 1em;
+  background: var(--fv-select);
+}
+
+.fv-waits .fv-waits-tools {
+  overflow: hidden;
+  padding: 0 0.3em;
+  font-size: 0.9em;
+  color: var(--w-subtle);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-waits .fv-waits-tools em {
+  font-style: normal;
+  color: var(--w-bad);
+}
+
+.fv-waits .fv-waits-say {
+  display: none;
+  overflow: hidden;
+  color: var(--fv-soft);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.fv-waits .fv-waits-reason {
+  display: grid;
+  justify-items: start;
+  gap: 0.3em;
+  padding: 0 0.3em;
+  font-size: 0.9em;
+}
+
+.fv-waits .fv-waits-reason b {
+  font-weight: 500;
+}
+
+.fv-waits .fv-waits-reason u {
+  text-decoration-style: dotted;
+  text-underline-offset: 0.2em;
+}
+
+.fv-waits .fv-waits-reason span {
+  color: var(--fv-soft);
+}
+
+.fv-waits .fv-waits-cancel {
+  margin-left: -0.65em;
+  padding: 0.3em 0.65em;
+  border-radius: 0.5em;
+  font-weight: 500;
+}
+
+.fv-waits .fv-waits-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9em;
+  padding: 0.85em 0.75em 0.65em 1em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 1.1em;
+  background: var(--fv-raise);
+  color: var(--w-subtle);
+}
+
+.fv-waits .fv-waits-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+}
+
+.fv-waits .fv-waits-tools-row svg {
+  width: 1.15em;
+  height: 1.15em;
+  fill: none;
+  stroke: var(--fv-soft);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-waits .fv-waits-tools-row .is-right {
+  margin-left: auto;
+}
+
+.fv-waits .fv-waits-tools-row i {
+  display: grid;
+  place-items: center;
+  width: 1.9em;
+  height: 1.9em;
+  border-radius: 50%;
+  background: var(--fv-select);
+}
+
+.fv-waits .fv-waits-tools-row i svg {
+  width: 1em;
+  height: 1em;
+  stroke-width: 2.2;
+}
+
+.fv-waits .fv-waits-compass,
+.fv-waits .fv-waits-count > span,
+.fv-waits .fv-waits-swap > *,
+.fv-waits .fv-waits-tools .is-run {
+  animation: var(--w-loop) var(--fv-swap) infinite both;
+}
+
+.fv-waits .fv-waits-compass {
+  animation-name: fv-waits-judge;
+}
+
+.fv-waits .fv-waits-count > .is-a {
+  animation-name: fv-waits-count-a;
+}
+
+.fv-waits .fv-waits-count > .is-b {
+  animation-name: fv-waits-count-b;
+}
+
+.fv-waits .fv-waits-tools > .is-a {
+  animation-name: fv-waits-tools-a;
+}
+
+.fv-waits .fv-waits-tools > .is-run {
+  animation:
+    fv-waits-tools-run var(--w-loop) var(--fv-swap) infinite both,
+    fv-waits-shimmer 1.5s linear infinite;
+}
+
+.fv-waits .fv-waits-tools > .is-b {
+  animation-name: fv-waits-tools-b;
+}
+
+.fv-waits .fv-waits-state > .is-a {
+  animation-name: fv-waits-state-a;
+}
+
+.fv-waits .fv-waits-state > .is-b {
+  animation-name: fv-waits-state-b;
+}
+
+@keyframes fv-waits-judge {
+  0%,
+  57% {
+    transform: none;
+  }
+
+  69%,
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fv-waits-count-a {
+  0%,
+  64% {
+    opacity: 1;
+    transform: none;
+  }
+
+  68%,
+  94% {
+    opacity: 0;
+    transform: translateY(-0.9em);
+  }
+
+  94.1% {
+    opacity: 0;
+    transform: none;
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-waits-count-b {
+  0%,
+  64% {
+    opacity: 0;
+    transform: translateY(0.9em);
+  }
+
+  68%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+
+  96%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-waits-tools-a {
+  0%,
+  24% {
+    opacity: 1;
+    transform: none;
+  }
+
+  27%,
+  94% {
+    opacity: 0;
+    transform: translateY(-0.3em);
+  }
+
+  94.1% {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-waits-tools-run {
+  0%,
+  25% {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+
+  28%,
+  52% {
+    opacity: 1;
+    transform: none;
+  }
+
+  55%,
+  100% {
+    opacity: 0;
+    transform: translateY(-0.3em);
+  }
+}
+
+@keyframes fv-waits-tools-b {
+  0%,
+  53% {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+
+  56%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-waits-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: 0 0;
+  }
+}
+
+@keyframes fv-waits-state-a {
+  0%,
+  17% {
+    opacity: 1;
+    transform: none;
+  }
+
+  21%,
+  94% {
+    opacity: 0;
+    transform: translateY(-0.3em);
+  }
+
+  94.1% {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-waits-state-b {
+  0%,
+  18% {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+
+  22%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-waits *,
+  .fv-waits *::before,
+  .fv-waits *::after {
+    animation: none !important;
+  }
+}
+
+@container (max-width: 559px) {
+  .fv-waits .fv-waits-reason span {
+    display: none;
+  }
+}
+
+@container (max-width: 230px) {
+  .fv-waits .fv-waits-objective,
+  .fv-waits .fv-waits-tools {
+    display: none;
+  }
+}
+
+@container (min-width: 560px) {
+  .fv.fv-waits {
+    font-size: 2.15cqw;
+  }
+
+  .fv-waits .fv-waits-bar {
+    padding: 0 1.2em;
+  }
+
+  .fv-waits .fv-waits-title small,
+  .fv-waits .fv-waits-user {
+    display: block;
+  }
+
+  .fv-waits .fv-waits-say {
+    display: -webkit-box;
+  }
+
+  .fv-waits .fv-waits-thread {
+    left: calc(50% - 15em);
+    right: auto;
+    width: 30em;
+    bottom: 1.2em;
+    gap: 1em;
+  }
+
+  .fv-waits .fv-waits-composer {
+    min-height: 5.6em;
+  }
+
+  .fv-waits .fv-waits-goal {
+    max-width: 21em;
+  }
+}

@@ -1,0 +1,308 @@
+.fv-canvas-inline {
+  --ci-loop: 8s;
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.9em;
+  padding: 1.3em 3em 0;
+  background:
+    radial-gradient(60% 50% at 50% 0, rgb(150 200 255 / 0.05), transparent),
+    var(--fv-canvas);
+}
+
+.fv-canvas-inline .fv-canvas-inline-you {
+  align-self: flex-end;
+  padding: 0.45em 1em;
+  border-radius: 1em;
+  background: var(--fv-select);
+  white-space: nowrap;
+}
+
+.fv-canvas-inline .fv-canvas-inline-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+}
+
+.fv-canvas-inline .fv-canvas-inline-answer {
+  color: var(--fv-soft);
+}
+
+.fv-canvas-inline .fv-canvas-inline-answer b {
+  color: var(--fv-ink);
+}
+
+.fv-canvas-inline .fv-canvas-inline-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.7em;
+  font-size: 0.9em;
+}
+
+.fv-canvas-inline .fv-canvas-inline-table td {
+  padding: 0.42em 0.9em;
+  border-top: 1px solid var(--fv-seam);
+  white-space: nowrap;
+}
+
+.fv-canvas-inline .fv-canvas-inline-table tr:first-child td {
+  border-top: 0;
+}
+
+.fv-canvas-inline .fv-canvas-inline-table td:first-child {
+  width: 42%;
+  color: var(--fv-soft);
+}
+
+.fv-canvas-inline .fv-canvas-inline-table .is-ok {
+  color: oklch(0.5 0.13 155);
+}
+
+.fv-canvas-inline .fv-canvas-inline-table .is-attn {
+  color: oklch(0.56 0.13 65);
+}
+
+.dark .fv-canvas-inline .fv-canvas-inline-table .is-ok {
+  color: var(--fv-ok);
+}
+
+.dark .fv-canvas-inline .fv-canvas-inline-table .is-attn {
+  color: var(--fv-attn);
+}
+
+.fv-canvas-inline .fv-canvas-inline-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6em;
+}
+
+.fv-canvas-inline .fv-canvas-inline-metrics li {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5em 0.8em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.7em;
+  background: var(--fv-raise);
+  white-space: nowrap;
+}
+
+.fv-canvas-inline .fv-canvas-inline-metrics b {
+  font-size: 1.15em;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-canvas-inline .fv-canvas-inline-metrics span {
+  color: var(--fv-dim);
+  font-size: 0.8em;
+}
+
+.fv-canvas-inline .fv-canvas-inline-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.fv-canvas-inline .fv-canvas-inline-progress > span {
+  color: var(--fv-soft);
+}
+
+.fv-canvas-inline .fv-canvas-inline-progress > i {
+  flex: 1;
+  height: 0.45em;
+  overflow: hidden;
+  border-radius: 99em;
+  background: var(--fv-select);
+}
+
+.fv-canvas-inline .fv-canvas-inline-progress > i > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--fv-ok);
+  transform: scaleX(0.833);
+  transform-origin: left;
+}
+
+.fv-canvas-inline .fv-canvas-inline-progress b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-canvas-inline .fv-canvas-inline-file {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  width: max-content;
+  padding: 0.55em 1.1em 0.55em 0.8em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.7em;
+  background: var(--fv-raise);
+}
+
+.fv-canvas-inline .fv-canvas-inline-file svg {
+  width: 1.5em;
+  height: 1.5em;
+  fill: none;
+  stroke: var(--fv-soft);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+.fv-canvas-inline .fv-canvas-inline-file > span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.fv-canvas-inline .fv-canvas-inline-file > span > span {
+  color: var(--fv-dim);
+  font-size: 0.8em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-canvas-inline .fv-canvas-inline-reply > * {
+    animation: fv-canvas-inline-stream var(--ci-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-canvas-inline .fv-canvas-inline-reply > :nth-child(2) {
+    animation-name: fv-canvas-inline-stream-2;
+  }
+
+  .fv-canvas-inline .fv-canvas-inline-reply > :nth-child(3) {
+    animation-name: fv-canvas-inline-stream-3;
+  }
+
+  .fv-canvas-inline .fv-canvas-inline-reply > :nth-child(4) {
+    animation-name: fv-canvas-inline-stream-4;
+  }
+
+  .fv-canvas-inline .fv-canvas-inline-reply > :nth-child(5) {
+    animation-name: fv-canvas-inline-stream-5;
+  }
+
+  .fv-canvas-inline .fv-canvas-inline-progress > i > i {
+    animation: fv-canvas-inline-fill var(--ci-loop) var(--fv-swap) infinite;
+  }
+}
+
+@keyframes fv-canvas-inline-stream {
+  0%,
+  6% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  12%,
+  92% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fv-canvas-inline-stream-2 {
+  0%,
+  16% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  22%,
+  92% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fv-canvas-inline-stream-3 {
+  0%,
+  28% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  34%,
+  92% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fv-canvas-inline-stream-4 {
+  0%,
+  40% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  46%,
+  92% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fv-canvas-inline-stream-5 {
+  0%,
+  56% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  62%,
+  92% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fv-canvas-inline-fill {
+  0%,
+  44% {
+    transform: scaleX(0);
+  }
+
+  58%,
+  100% {
+    transform: scaleX(0.833);
+  }
+}
+
+.fv-canvas-inline > * {
+  flex: none;
+}

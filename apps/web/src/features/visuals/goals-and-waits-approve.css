@@ -1,0 +1,401 @@
+.fv.fv-goals-and-waits-approve {
+  --ga-loop: 9s;
+  --ga-shift: 9em;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-goals-and-waits-approve .fv-ga-head {
+  position: absolute;
+  top: 0.9em;
+  left: 1.3em;
+  right: 1.3em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fv-goals-and-waits-approve .fv-ga-head b {
+  font-weight: 600;
+}
+
+.fv-goals-and-waits-approve .fv-ga-head .fv-pill {
+  font-size: 0.74em;
+}
+
+.fv-goals-and-waits-approve .fv-ga-sec {
+  position: absolute;
+  left: calc(1.3em / 0.68);
+  display: flex;
+  gap: 0.5em;
+  font-size: 0.68em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-approve .fv-ga-sec span {
+  color: var(--fv-soft);
+}
+
+.fv-goals-and-waits-approve .fv-ga-sec.is-need {
+  top: calc(3em / 0.68);
+}
+
+.fv-goals-and-waits-approve .fv-ga-sec.is-wait {
+  top: calc(12.6em / 0.68);
+}
+
+.fv-goals-and-waits-approve .fv-ga-card {
+  position: absolute;
+  top: 4em;
+  left: 1.3em;
+  right: 1.3em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45em;
+  padding: 0.65em 0.85em;
+  border: 1px solid color-mix(in oklch, var(--fv-attn) 40%, var(--fv-seam));
+  border-radius: 0.75em;
+  background: var(--fv-raise);
+}
+
+.fv-goals-and-waits-approve .fv-ga-top {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: 0.88em;
+}
+
+.fv-goals-and-waits-approve .fv-ga-top b {
+  font-weight: 560;
+}
+
+.fv-goals-and-waits-approve .fv-ga-top em {
+  margin-left: auto;
+  font-size: 0.86em;
+  font-style: normal;
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-approve .fv-ga-ask {
+  font-size: 0.84em;
+}
+
+.fv-goals-and-waits-approve .fv-ga-key {
+  padding: 0.35em 0.6em;
+  border-radius: 0.45em;
+  background: var(--fv-canvas);
+  font-family: var(--fv-mono);
+  font-size: 0.72em;
+  color: var(--fv-soft);
+}
+
+.fv-goals-and-waits-approve .fv-ga-key b {
+  font-weight: 400;
+  color: var(--fv-info);
+}
+
+.fv-goals-and-waits-approve .fv-ga-actions {
+  display: flex;
+  gap: 0.5em;
+  font-size: 0.8em;
+}
+
+.fv-goals-and-waits-approve .fv-ga-actions span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.2em 0.85em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.5em;
+}
+
+.fv-goals-and-waits-approve .fv-ga-actions .is-main {
+  border-color: transparent;
+  background: var(--fv-ink);
+  color: var(--fv-canvas);
+  font-weight: 600;
+}
+
+.fv-goals-and-waits-approve .fv-ga-row {
+  position: absolute;
+  left: 1.3em;
+  right: 1.3em;
+  display: grid;
+  grid-template-columns: 0.6em 1fr auto;
+  align-items: center;
+  gap: 0.7em;
+  height: 2.3em;
+  padding: 0 0.85em;
+  border-radius: 0.6em;
+  background: var(--fv-raise);
+  font-size: 0.88em;
+}
+
+.fv-goals-and-waits-approve .fv-ga-row b {
+  overflow: hidden;
+  font-weight: 560;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-goals-and-waits-approve .fv-ga-row small {
+  font-size: 0.84em;
+  color: var(--fv-dim);
+  white-space: nowrap;
+}
+
+.fv-goals-and-waits-approve .fv-ga-row.is-other {
+  top: calc(13.7em / 0.88);
+}
+
+.fv-goals-and-waits-approve .fv-ga-row.is-moved {
+  top: calc(16.4em / 0.88);
+  opacity: 0;
+}
+
+.fv-goals-and-waits-approve .fv-ga-detail {
+  display: grid;
+  justify-items: end;
+}
+
+.fv-goals-and-waits-approve .fv-ga-detail > small {
+  grid-area: 1 / 1;
+}
+
+.fv-goals-and-waits-approve .fv-ga-detail > .is-later {
+  opacity: 0;
+}
+
+.fv-goals-and-waits-approve .fv-ga-toast {
+  position: absolute;
+  top: calc(0.7em / 0.8);
+  right: calc(1.3em / 0.8);
+  display: flex;
+  align-items: center;
+  gap: 1.2em;
+  padding: 0.3em 0.9em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.7em;
+  background: var(--fv-select);
+  font-size: 0.8em;
+  opacity: 0;
+}
+
+.fv-goals-and-waits-approve .fv-ga-toast em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--fv-info);
+}
+
+.fv-goals-and-waits-approve .fv-ga-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1.3em;
+  height: 1.6em;
+  fill: var(--fv-ink);
+  stroke: var(--fv-canvas);
+  stroke-width: 1.2;
+  opacity: 0;
+  filter: drop-shadow(0 0.15em 0.25em rgb(0 0 0 / 0.6));
+}
+
+.fv-goals-and-waits-approve
+  :where(
+    .fv-ga-card,
+    .fv-ga-actions .is-main,
+    .fv-ga-row.is-moved,
+    .fv-ga-detail > small,
+    .fv-ga-toast,
+    .fv-ga-cursor,
+    .fv-ga-sec.is-need span
+  ) {
+  animation: var(--ga-loop) var(--fv-swap) infinite both;
+}
+
+.fv-goals-and-waits-approve .fv-ga-card {
+  animation-name: fv-ga-card;
+}
+
+.fv-goals-and-waits-approve .fv-ga-sec.is-need span {
+  animation-name: fv-ga-count;
+}
+
+@keyframes fv-ga-count {
+  0%,
+  34% {
+    opacity: 1;
+  }
+
+  38%,
+  95% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+.fv-goals-and-waits-approve .fv-ga-actions .is-main {
+  animation-name: fv-ga-press;
+}
+
+.fv-goals-and-waits-approve .fv-ga-row.is-moved {
+  animation-name: fv-ga-moved;
+}
+
+.fv-goals-and-waits-approve .fv-ga-detail .is-first {
+  animation-name: fv-ga-first;
+}
+
+.fv-goals-and-waits-approve .fv-ga-detail .is-later {
+  animation-name: fv-ga-later;
+}
+
+.fv-goals-and-waits-approve .fv-ga-toast {
+  animation-name: fv-ga-toast;
+}
+
+.fv-goals-and-waits-approve .fv-ga-cursor {
+  animation-name: fv-ga-cursor;
+  animation-timing-function: ease-in-out;
+}
+
+@keyframes fv-ga-cursor {
+  0%,
+  10% {
+    opacity: 0;
+    transform: translate(26em, 15em);
+  }
+
+  14% {
+    opacity: 1;
+  }
+
+  26%,
+  31% {
+    opacity: 1;
+    transform: translate(4.2em, 10.2em);
+  }
+
+  36%,
+  100% {
+    opacity: 0;
+    transform: translate(4.2em, 10.2em);
+  }
+}
+
+@keyframes fv-ga-press {
+  0%,
+  28% {
+    transform: none;
+  }
+
+  30% {
+    transform: scale(0.92);
+  }
+
+  33%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-ga-card {
+  0%,
+  33% {
+    opacity: 1;
+    transform: none;
+  }
+
+  40%,
+  95% {
+    opacity: 0;
+    transform: translateY(var(--ga-shift)) scale(0.97);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-ga-moved {
+  0%,
+  37% {
+    opacity: 0;
+    transform: translateY(-0.6em);
+  }
+
+  43%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ga-first {
+  0%,
+  62% {
+    opacity: 1;
+  }
+
+  65%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ga-later {
+  0%,
+  62% {
+    opacity: 0;
+  }
+
+  65%,
+  95% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ga-toast {
+  0%,
+  36% {
+    opacity: 0;
+    transform: translateY(0.6em);
+  }
+
+  41%,
+  58% {
+    opacity: 1;
+    transform: none;
+  }
+
+  63%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-goals-and-waits-approve *,
+  .fv-goals-and-waits-approve *::before,
+  .fv-goals-and-waits-approve *::after {
+    animation: none !important;
+  }
+}

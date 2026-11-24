@@ -1,0 +1,308 @@
+.fv.fv-chat-import-handoff {
+  --ch-loop: 8s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-canvas);
+}
+
+.fv-chat-import-handoff .fv-ch-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 2.6em;
+  padding: 0 1.2em;
+  border-bottom: 1px solid var(--fv-seam);
+  background: var(--fv-chrome);
+  white-space: nowrap;
+}
+
+.fv-chat-import-handoff .fv-ch-bar b {
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+.fv-chat-import-handoff .fv-ch-bar small {
+  font-size: 0.72em;
+  color: var(--fv-dim);
+}
+
+.fv-chat-import-handoff .fv-ch-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 0.9em 1.8em 0;
+  font-size: 0.82em;
+}
+
+.fv-chat-import-handoff .fv-ch-you {
+  align-self: flex-end;
+  max-width: 82%;
+  padding: 0.45em 0.9em;
+  border-radius: 1em;
+  background: var(--fv-select);
+  line-height: 1.4;
+}
+
+.fv-chat-import-handoff .fv-ch-tool {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: 0.9em;
+  color: var(--fv-dim);
+}
+
+.fv-chat-import-handoff .fv-ch-tool svg {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: var(--fv-ok);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-chat-import-handoff .fv-ch-card {
+  padding: 0.6em 0.8em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.75em;
+  background: var(--fv-raise);
+}
+
+.fv-chat-import-handoff .fv-ch-card h4 {
+  margin-bottom: 0.35em;
+  font-weight: 600;
+}
+
+.fv-chat-import-handoff .fv-ch-card ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2em;
+}
+
+.fv-chat-import-handoff .fv-ch-card li {
+  display: grid;
+  grid-template-columns: 4.6em 1fr;
+  gap: 0.5em;
+  font-size: 0.92em;
+}
+
+.fv-chat-import-handoff .fv-ch-card li b {
+  font-weight: 560;
+  color: var(--fv-soft);
+}
+
+.fv-chat-import-handoff .fv-ch-card li span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-chat-import-handoff .fv-ch-end {
+  font-size: 0.92em;
+  color: var(--fv-soft);
+}
+
+.fv-chat-import-handoff
+  :where(.fv-ch-tool, .fv-ch-card, .fv-ch-card li, .fv-ch-end) {
+  animation: var(--ch-loop) var(--fv-swap) infinite both;
+}
+
+.fv-chat-import-handoff .fv-ch-tool:nth-of-type(2) {
+  animation-name: fv-ch-in-0;
+}
+
+.fv-chat-import-handoff .fv-ch-tool:nth-of-type(3) {
+  animation-name: fv-ch-in-1;
+}
+
+.fv-chat-import-handoff .fv-ch-card {
+  animation-name: fv-ch-in-2;
+}
+
+.fv-chat-import-handoff .fv-ch-card li:nth-child(1) {
+  animation-name: fv-ch-in-3;
+}
+
+.fv-chat-import-handoff .fv-ch-card li:nth-child(2) {
+  animation-name: fv-ch-in-4;
+}
+
+.fv-chat-import-handoff .fv-ch-card li:nth-child(3) {
+  animation-name: fv-ch-in-5;
+}
+
+.fv-chat-import-handoff .fv-ch-card li:nth-child(4) {
+  animation-name: fv-ch-in-6;
+}
+
+.fv-chat-import-handoff .fv-ch-end {
+  animation-name: fv-ch-in-7;
+}
+
+@keyframes fv-ch-in-0 {
+  0%,
+  10% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  15%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ch-in-1 {
+  0%,
+  18% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  23%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ch-in-2 {
+  0%,
+  28% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  33%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ch-in-3 {
+  0%,
+  33% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  38%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ch-in-4 {
+  0%,
+  38% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  43%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ch-in-5 {
+  0%,
+  43% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  48%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ch-in-6 {
+  0%,
+  48% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  53%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-ch-in-7 {
+  0%,
+  55% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  60%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-chat-import-handoff *,
+  .fv-chat-import-handoff *::before,
+  .fv-chat-import-handoff *::after {
+    animation: none !important;
+  }
+}

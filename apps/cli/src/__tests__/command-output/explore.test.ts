@@ -149,7 +149,9 @@ function fixtureFetch(
   return vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
 
-    if (url === "https://omnyohq.com/explore/marketplace.json") {
+    if (
+      url === "https://omnyohq.com/explore/marketplace.json?provider-setup=1"
+    ) {
       return new Response(JSON.stringify(MARKETPLACE_CATALOG), {
         headers: { "content-type": "application/json" },
       });
@@ -206,7 +208,7 @@ describe("omnyo explore command output", () => {
     expect(parsedStdout()).toEqual({ items: MARKETPLACE_CATALOG.items });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0]?.[0]).toBe(
-      "https://omnyohq.com/explore/marketplace.json",
+      "https://omnyohq.com/explore/marketplace.json?provider-setup=1",
     );
     expect(fetch.mock.calls[0]?.[1]).toMatchObject({
       headers: { accept: "application/json" },

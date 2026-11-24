@@ -1,0 +1,244 @@
+.fv-inbox {
+  display: flex;
+  gap: 1.1em;
+  padding: 1em 1.6em 0 1.2em;
+  background:
+    radial-gradient(55% 45% at 70% 0, rgb(255 200 150 / 0.05), transparent),
+    var(--fv-chrome);
+}
+
+.fv-inbox-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 0.6em;
+}
+
+.fv-inbox-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.6em;
+  height: 2.6em;
+  border-radius: 0.7em;
+  background: var(--fv-raise);
+  color: var(--fv-dim);
+  font-weight: 600;
+}
+
+.fv-inbox-tile.is-on {
+  background: var(--fv-select);
+  color: var(--fv-ink);
+}
+
+.fv-inbox-tile svg {
+  width: 1.5em;
+  height: 1.5em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+}
+
+.fv-inbox-tile b {
+  position: absolute;
+  top: -0.35em;
+  right: -0.35em;
+  display: grid;
+  place-items: center;
+  min-width: 1.35em;
+  height: 1.35em;
+  border-radius: 99em;
+  background: var(--fv-attn);
+  color: var(--fv-canvas);
+  font-size: 0.72em;
+}
+
+.fv-inbox-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0.8em 1.1em;
+  border: 1px solid var(--fv-seam);
+  border-bottom: 0;
+  border-radius: 1.1em 1.1em 0 0;
+  background: var(--fv-canvas);
+  box-shadow: 0 1.6em 3em -1.2em var(--fv-shade);
+}
+
+.dark .fv-inbox-list {
+  box-shadow: 0 1.6em 3em -1.2em rgb(0 0 0 / 0.7);
+}
+
+.fv-inbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fv-inbox-head h3 {
+  font-size: 1.05em;
+  font-weight: 600;
+}
+
+.fv-inbox-sec {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin: 0.75em 0 0.4em;
+  font-size: 0.68em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fv-dim);
+}
+
+.fv-inbox-sec span {
+  color: var(--fv-soft);
+}
+
+.fv-inbox-spin {
+  width: 0.95em;
+  height: 0.95em;
+  border: 0.16em solid var(--fv-hair);
+  border-top-color: var(--fv-ok);
+  border-radius: 50%;
+  animation: fv-inbox-spin 1.4s linear infinite;
+}
+
+@keyframes fv-inbox-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-inbox-spin {
+    animation: none;
+  }
+}
+
+.fv-inbox-card {
+  display: grid;
+  grid-template-columns: 1.7em 1fr auto;
+  align-items: center;
+  gap: 0.3em 0.75em;
+  padding: 0.42em 0.7em;
+  border-radius: 0.65em;
+  background: var(--fv-raise);
+}
+
+.fv-inbox-card b {
+  overflow: hidden;
+  font-weight: 560;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-inbox-card > span {
+  font-size: 0.86em;
+  white-space: nowrap;
+}
+
+.fv-inbox-card p {
+  grid-column: 2 / -1;
+  font-size: 0.9em;
+}
+
+.fv-inbox-card.is-ask {
+  border: 1px solid color-mix(in oklch, var(--fv-attn) 45%, var(--fv-seam));
+  background: color-mix(in oklch, var(--fv-attn) 7%, var(--fv-select));
+}
+
+.fv-inbox-card.is-ask p {
+  color: var(--fv-ink);
+}
+
+.fv-inbox-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 1.7em;
+  height: 1.7em;
+  border-radius: 0.45em;
+  background: color-mix(in oklch, var(--fv-accent) 55%, var(--fv-canvas));
+  color: var(--fv-ink);
+  font-size: 0.8em;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.fv-inbox-mark.is-a {
+  background: color-mix(in oklch, var(--fv-info) 45%, var(--fv-canvas));
+}
+
+.fv-inbox-mark::after {
+  content: "";
+  position: absolute;
+  top: -0.25em;
+  right: -0.25em;
+  width: 0.7em;
+  height: 0.7em;
+  border: 0.15em solid var(--fv-canvas);
+  border-radius: 50%;
+  background: var(--fv-attn);
+}
+
+.fv-inbox-card.is-run .fv-inbox-mark::after {
+  background: var(--fv-ok);
+}
+
+.fv-inbox-mark.is-wait::after {
+  display: none;
+}
+
+.fv-inbox-answers {
+  grid-column: 2 / -1;
+  display: flex;
+  gap: 0.6em;
+  padding-bottom: 0.1em;
+}
+
+.fv-inbox-answers span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: 0.2em 0.8em 0.2em 0.3em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.55em;
+  background: var(--fv-canvas);
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.fv-inbox-answers .fv-key {
+  min-width: 1.5em;
+  height: 1.5em;
+  font-size: 0.78em;
+}
+
+.fv-inbox-check {
+  justify-self: center;
+  width: 1.5em;
+  height: 1.5em;
+  fill: none;
+  stroke: var(--fv-ok);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-inbox-archive {
+  padding: 0.1em 0.8em;
+  border: 1px solid color-mix(in oklch, var(--fv-ok) 45%, var(--fv-seam));
+  border-radius: 0.5em;
+  color: var(--fv-ok);
+}
+
+.fv-inbox-bar {
+  grid-column: 2 / -1;
+  height: 0.28em;
+  border-radius: 99em;
+  background: linear-gradient(90deg, var(--fv-ok) 60%, var(--fv-hair) 60%);
+}

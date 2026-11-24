@@ -29,7 +29,13 @@ Open the local URL printed by the launcher. Sign in to your coding provider in i
 
 ## What's included
 
-The source preview includes the coordinator, browser app, CLI, host daemon, and in-tree plugins. The coordinator stores threads and settings in a local SQLite database. Built-in diagnostic collection is disabled in this preview. See the [system overview](docs/system-overview.md).
+The source includes the coordinator, browser app, CLI, host daemon, in-tree plugins, and the Omnyo website. The coordinator stores threads and settings in a local SQLite database. Built-in app diagnostic collection is disabled. See the [system overview](docs/system-overview.md).
+
+### Website
+
+Run `pnpm exec turbo run dev --filter=@omnyo/web` to start the website in development mode. Build it with `pnpm exec turbo run build --filter=@omnyo/web`.
+
+Website error reporting is off by default. Set `VITE_OMNYO_WEBSITE_SENTRY_DSN` before building to use your own Sentry project. The browser bundle includes this public DSN.
 
 ## Feedback and security
 

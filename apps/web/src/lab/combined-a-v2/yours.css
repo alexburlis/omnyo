@@ -1,0 +1,278 @@
+.lab-open-5 .yours.yours--route {
+  height: 150vh;
+}
+
+.lab-open-5 .yours--route .yours-pin {
+  --reach: clamp(0, (var(--p) - var(--reach-from)) / var(--reach-span), 1);
+  --route-in: clamp(0, (var(--p) + 0.52) / 0.16, 1);
+  --orb: clamp(0, (var(--p) + 0.4) / 0.3, 1);
+  padding: 96px var(--pad) 56px;
+  gap: 22px;
+}
+
+.lab-open-5 .yours--route .yours-title .k {
+  font-stretch: 100%;
+  filter: blur(calc((1 - var(--t)) * 9px));
+}
+
+.lab-open-5 .yours--route .route {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 120px;
+  margin: 0 9px;
+}
+
+.lab-open-5 .yours--route :is(.route-line, .route-track, .route-head) {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  pointer-events: none;
+}
+
+.lab-open-5 .yours--route .route-line {
+  height: 1px;
+  background: repeating-linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--fg) 26%, transparent) 0 5px,
+    transparent 5px 11px
+  );
+  opacity: var(--route-in);
+}
+
+.lab-open-5 .yours--route .route-track {
+  transform: scaleY(var(--reach));
+}
+
+.lab-open-5 .yours--route .route-head {
+  height: 0;
+  transform: translate3d(calc(var(--reach) * 100%), 0, 0);
+}
+
+.lab-open-5 .yours--route .route-head i {
+  position: absolute;
+  top: -80px;
+  left: -130px;
+  width: 260px;
+  height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in oklab, var(--accent) 34%, transparent),
+    color-mix(in oklab, var(--accent) 10%, transparent) 55%,
+    transparent
+  );
+  opacity: calc(var(--orb) * clamp(0, (1 - var(--reach)) * 9, 1));
+  mix-blend-mode: screen;
+}
+
+.lab-open-5 .yours--route .route-node {
+  --in: clamp(0, (var(--p) - var(--show)) / 0.12, 1);
+  --lit: clamp(0, (var(--p) - var(--arrive)) / 0.05, 1);
+  --ring: clamp(0, (var(--p) - var(--arrive)) / 0.16, 1);
+  --dot: var(--fg);
+  position: absolute;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 30px;
+  white-space: nowrap;
+  opacity: var(--in);
+  transform: translateY(calc((1 - var(--in)) * 14px));
+}
+
+.lab-open-5 .yours--route .route-node::before,
+.lab-open-5 .yours--route .route-node::after {
+  content: "";
+  position: absolute;
+  top: -9px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
+.lab-open-5 .yours--route .route-node::before {
+  border: 1.5px solid
+    color-mix(in oklab, var(--dot) calc(40% + 60% * var(--lit)), transparent);
+  background: color-mix(
+    in oklab,
+    var(--dot) calc(var(--lit) * 100%),
+    var(--bg)
+  );
+  box-shadow:
+    0 0 0 6px color-mix(in oklab, var(--fg) 7%, transparent),
+    0 0 calc(var(--lit) * 26px) calc(var(--lit) * 2px)
+      color-mix(in oklab, var(--dot) 45%, transparent);
+}
+
+.lab-open-5 .yours--route .route-node::after {
+  border: 1.5px solid var(--dot);
+  opacity: calc(var(--ring) * (1 - var(--ring)) * 3.4);
+  transform: scale(calc(1 + var(--ring) * 2.6));
+}
+
+.lab-open-5 .yours--route .route-node b {
+  color: var(--fg);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  opacity: calc(0.42 + 0.58 * var(--lit));
+}
+
+.lab-open-5 .yours--route .route-node small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: var(--lit);
+  transform: translateY(calc((1 - var(--lit)) * 6px));
+}
+
+.lab-open-5 .yours--route .route-node--0 {
+  left: 0;
+  margin-left: -9px;
+}
+
+.lab-open-5 .yours--route .route-node--0::before,
+.lab-open-5 .yours--route .route-node--0::after {
+  left: 0;
+}
+
+.lab-open-5 .yours--route .route-node--1 {
+  --dot: var(--accent);
+  left: 50%;
+  align-items: center;
+  translate: -50% 0;
+}
+
+.lab-open-5 .yours--route .route-node--1::before,
+.lab-open-5 .yours--route .route-node--1::after {
+  left: calc(50% - 9px);
+}
+
+.lab-open-5 .yours--route .route-node--2 {
+  right: 0;
+  align-items: flex-end;
+  margin-right: -9px;
+}
+
+.lab-open-5 .yours--route .route-node--2::before,
+.lab-open-5 .yours--route .route-node--2::after {
+  right: 0;
+}
+
+.lab-open-5 .yours--route .route-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.lab-open-5 .yours--route .route-copy {
+  max-width: 44ch;
+  margin: 0;
+  color: var(--fg);
+  text-wrap: balance;
+}
+
+.lab-open-5 .yours--route .route-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 0;
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  list-style: none;
+}
+
+.lab-open-5 .yours--route .route-facts li:not(:last-child)::after {
+  content: "·";
+  padding: 0 10px;
+}
+
+@media (max-width: 720px) {
+  .lab-open-5 .yours--route .yours-pin {
+    justify-content: center;
+    padding: 78px var(--pad) 32px;
+    gap: 18px;
+  }
+
+  .lab-open-5 .yours--route .route {
+    flex: 0 1 200px;
+    min-height: 150px;
+  }
+
+  .lab-open-5 .yours--route .route-head i {
+    top: -56px;
+    left: -90px;
+    width: 180px;
+    height: 112px;
+  }
+
+  .lab-open-5 .yours--route .route-node {
+    padding-top: 24px;
+  }
+
+  .lab-open-5 .yours--route .route-node b {
+    font-size: 13px;
+  }
+
+  .lab-open-5 .yours--route .route-node small {
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+  }
+
+  .lab-open-5 .yours--route .route-node--1 {
+    top: auto;
+    bottom: 50%;
+    flex-direction: column-reverse;
+    padding: 0 0 24px;
+  }
+
+  .lab-open-5 .yours--route .route-node--1::before,
+  .lab-open-5 .yours--route .route-node--1::after {
+    top: auto;
+    bottom: -9px;
+  }
+
+  .lab-open-5 .yours--route .route-copy {
+    font-size: 16px;
+  }
+
+  .lab-open-5 .yours--route .route-facts {
+    flex-direction: column;
+    gap: 5px;
+    font-size: 13.5px;
+  }
+
+  .lab-open-5 .yours--route .route-facts li {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .lab-open-5 .yours--route .route-facts li::before {
+    content: "";
+    flex: none;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .lab-open-5 .yours--route .route-facts li:not(:last-child)::after {
+    content: none;
+  }
+}
+
+.lab-open-5.is-reduced .yours.yours--route {
+  height: auto;
+}
+
+.lab-open-5.is-reduced .yours--route .yours-title .k {
+  filter: none;
+}

@@ -1,0 +1,63 @@
+body:has(.lab-visuals) {
+  margin: 0;
+  background: rgb(242 241 236);
+}
+
+.lab-visuals {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  padding: 32px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: rgb(12 12 13);
+}
+
+.lab-visuals h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.lab-visuals pre {
+  color: #b00020;
+  white-space: pre-wrap;
+}
+
+.lab-visuals .lv-sizes {
+  display: grid;
+  grid-template-columns: 800px 520px;
+  grid-template-rows: auto auto;
+  gap: 20px;
+  align-items: start;
+}
+
+.lab-visuals .lv-frame {
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgb(12 12 13);
+}
+
+.lab-visuals .lv-frame--hero {
+  grid-row: span 2;
+  width: 800px;
+  aspect-ratio: 16 / 10;
+}
+
+.lab-visuals .lv-frame--wide {
+  width: 520px;
+  aspect-ratio: 2 / 1;
+}
+
+.lab-visuals .lv-frame--card {
+  width: 250px;
+  aspect-ratio: 16 / 10;
+}
+
+.lab-visuals .lv-frame--tall {
+  width: 340px;
+  aspect-ratio: 4 / 3;
+  grid-column: 2;
+  margin-top: -176px;
+  margin-left: 270px;
+  position: relative;
+}

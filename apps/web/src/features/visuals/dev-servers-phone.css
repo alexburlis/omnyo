@@ -1,0 +1,437 @@
+.fv-dev-servers-phone {
+  --dp-loop: 9s;
+  --dp-page: rgb(250 250 248);
+  --dp-text: rgb(28 30 36);
+  --dp-line: rgb(226 227 230);
+
+  background:
+    radial-gradient(50% 60% at 75% 50%, rgb(255 200 150 / 0.07), transparent),
+    var(--fv-chrome);
+}
+
+.fv-dev-servers-phone svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-route {
+  position: absolute;
+  top: 7.9em;
+  left: 2.5em;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-node {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 10.6em;
+  padding: 0.6em 0.85em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.7em;
+  background: var(--fv-raise);
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-node b {
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-node span {
+  color: var(--fv-dim);
+  font-family: var(--fv-mono);
+  font-size: 0.74em;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-wire {
+  position: relative;
+  width: 1px;
+  height: 2.4em;
+  margin-left: 1.6em;
+  background: var(--fv-hair);
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-wire.is-across::after {
+  top: -0.2em;
+  left: 0;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-wire.is-across {
+  position: absolute;
+  top: 15.4em;
+  left: 13.4em;
+  width: 10.4em;
+  height: 1px;
+  margin: 0;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-wire::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -0.2em;
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: var(--fv-ok);
+  opacity: 0;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-device {
+  position: absolute;
+  top: 1.1em;
+  right: 3.5em;
+  width: 12.4em;
+  height: 23.6em;
+  padding: 0.45em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 2em;
+  background: oklch(0.12 0.008 268);
+  box-shadow: 0 1.6em 3em -1em var(--fv-dp-shade);
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-screen {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 1.6em;
+  background: var(--fv-canvas);
+  font-size: 0.78em;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 4em;
+  padding: 1.4em 0.8em 0;
+  white-space: nowrap;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-head > svg {
+  width: 1.2em;
+  height: 1.2em;
+  color: var(--fv-soft);
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-head b {
+  flex: 1;
+  font-weight: 600;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-servers {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.3em 0.5em;
+  border-radius: 0.5em;
+  background: var(--fv-raise);
+  font-weight: 600;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-servers svg {
+  width: 1.1em;
+  height: 1.1em;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-servers i {
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: var(--fv-ok);
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8em;
+  padding: 1em 0.9em;
+  color: var(--fv-soft);
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-you {
+  align-self: flex-end;
+  padding: 0.4em 0.8em;
+  border-radius: 0.9em;
+  background: var(--fv-select);
+  color: var(--fv-ink);
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-sheet {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.6em 1em 1.6em;
+  border-top: 1px solid var(--fv-hair);
+  border-radius: 1.2em 1.2em 0 0;
+  background: var(--fv-raise);
+  box-shadow: 0 -1em 2em -1em var(--fv-dp-sheet-shade);
+  transform: translateY(100%);
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-grip {
+  align-self: center;
+  width: 2.6em;
+  height: 0.3em;
+  border-radius: 99em;
+  background: var(--fv-hair);
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-sheet > b {
+  font-weight: 600;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-sheet p {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-sheet p > span {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  font-weight: 560;
+  line-height: 1.3;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-sheet small {
+  color: var(--fv-dim);
+  font-size: 0.85em;
+  font-weight: 400;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-sheet em {
+  padding: 0.2em 0.5em;
+  border-radius: 0.45em;
+  background: var(--fv-select);
+  font-style: normal;
+  font-weight: 560;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-web {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--dp-page);
+  color: var(--dp-text);
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-web header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1.5em 0.8em 0.6em;
+  border-bottom: 1px solid var(--dp-line);
+  background: rgb(240 240 238);
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-web header span {
+  align-self: flex-start;
+  margin-bottom: -1.3em;
+  color: oklch(0.55 0.17 255);
+  font-weight: 600;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-web header small {
+  color: rgb(110 114 124);
+  font-size: 0.85em;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  padding: 1.1em 1em;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-page b {
+  font-size: 1.3em;
+  font-weight: 650;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-export {
+  align-self: flex-start;
+  padding: 0.4em 0.9em;
+  border-radius: 0.5em;
+  background: var(--dp-text);
+  color: var(--dp-page);
+  font-weight: 600;
+}
+
+.fv-dev-servers-phone .fv-dev-servers-phone-page i {
+  height: 1.9em;
+  border-top: 1px solid var(--dp-line);
+  background: linear-gradient(
+      90deg,
+      rgb(200 202 208) 0 30%,
+      transparent 30% 45%,
+      rgb(220 222 226) 45% 80%,
+      transparent 80%
+    )
+    0 0.7em / 100% 0.5em no-repeat;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-dev-servers-phone .fv-dev-servers-phone-servers {
+    animation: fv-dev-servers-phone-tap var(--dp-loop) linear infinite;
+  }
+
+  .fv-dev-servers-phone .fv-dev-servers-phone-sheet {
+    animation: fv-dev-servers-phone-sheet var(--dp-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-dev-servers-phone .fv-dev-servers-phone-sheet p:first-of-type em {
+    animation: fv-dev-servers-phone-open var(--dp-loop) linear infinite;
+  }
+
+  .fv-dev-servers-phone .fv-dev-servers-phone-web {
+    animation: fv-dev-servers-phone-web var(--dp-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-dev-servers-phone .fv-dev-servers-phone-wire::after {
+    animation: fv-dev-servers-phone-packet var(--dp-loop) linear infinite;
+  }
+
+  .fv-dev-servers-phone .fv-dev-servers-phone-wire.is-across::after {
+    animation-name: fv-dev-servers-phone-packet-2;
+  }
+}
+
+@keyframes fv-dev-servers-phone-tap {
+  0%,
+  14% {
+    transform: scale(1);
+  }
+
+  16% {
+    transform: scale(0.88);
+  }
+
+  18%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes fv-dev-servers-phone-sheet {
+  0%,
+  18% {
+    transform: translateY(100%);
+  }
+
+  24%,
+  50% {
+    transform: translateY(0);
+  }
+
+  56%,
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes fv-dev-servers-phone-open {
+  0%,
+  40% {
+    transform: scale(1);
+  }
+
+  42% {
+    transform: scale(0.88);
+  }
+
+  44%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes fv-dev-servers-phone-web {
+  0%,
+  45% {
+    transform: translateX(105%);
+  }
+
+  52%,
+  94% {
+    transform: translateX(0);
+  }
+
+  100% {
+    transform: translateX(105%);
+  }
+}
+
+@keyframes fv-dev-servers-phone-packet {
+  0%,
+  44% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+
+  46% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  52% {
+    opacity: 1;
+    transform: translateY(2em);
+  }
+
+  54%,
+  100% {
+    opacity: 0;
+    transform: translateY(2em);
+  }
+}
+
+@keyframes fv-dev-servers-phone-packet-2 {
+  0%,
+  51% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+
+  53% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  59% {
+    opacity: 1;
+    transform: translateX(10em);
+  }
+
+  61%,
+  100% {
+    opacity: 0;
+    transform: translateX(10em);
+  }
+}
+
+:where(.fv-box, .fv) {
+  --fv-dp-shade: var(--fv-shade);
+  --fv-dp-sheet-shade: color-mix(in oklab, var(--fv-ink) 14%, transparent);
+}
+
+.dark :where(.fv-box, .fv) {
+  --fv-dp-shade: rgb(0 0 0 / 0.7);
+  --fv-dp-sheet-shade: rgb(0 0 0 / 0.6);
+}

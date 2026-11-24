@@ -1,0 +1,389 @@
+.fv.fv-chat-import-cli {
+  --ci-loop: 9s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-chat-import-cli .fv-ci-term {
+  position: absolute;
+  inset: 0.9em;
+  overflow: hidden;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-canvas);
+}
+
+.dark .fv-chat-import-cli .fv-ci-term {
+  background: oklch(0.145 0.008 268);
+}
+
+.fv-chat-import-cli .fv-ci-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 1.9em;
+  padding: 0 0.8em;
+  border-bottom: 1px solid var(--fv-seam);
+}
+
+.fv-chat-import-cli .fv-ci-bar i {
+  width: 0.62em;
+  height: 0.62em;
+  border-radius: 50%;
+  background: var(--fv-hair);
+}
+
+.fv-chat-import-cli .fv-ci-bar span {
+  margin-left: 0.6em;
+  font-size: 0.72em;
+  color: var(--fv-dim);
+}
+
+.fv-chat-import-cli .fv-ci-lines {
+  padding: 0.7em 0.9em;
+  font-family: var(--fv-mono);
+  font-size: 0.66em;
+  line-height: 1.62;
+  white-space: pre;
+  color: var(--fv-soft);
+}
+
+.fv-chat-import-cli .fv-ci-lines p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fv-chat-import-cli .fv-ci-lines .is-cmd {
+  color: var(--fv-ink);
+}
+
+.fv-chat-import-cli .fv-ci-lines .is-cmd:not(:first-child) {
+  margin-top: 0.7em;
+}
+
+.fv-chat-import-cli .fv-ci-lines .is-cmd b {
+  font-weight: 400;
+  color: oklch(0.5 0.13 155);
+}
+
+.dark .fv-chat-import-cli .fv-ci-lines .is-cmd b {
+  color: var(--fv-ok);
+}
+
+.fv-chat-import-cli .fv-ci-lines .is-gap {
+  height: 0.8em;
+}
+
+.fv-chat-import-cli .fv-ci-lines em {
+  font-style: normal;
+}
+
+.fv-chat-import-cli .fv-ci-lines .is-ready {
+  color: oklch(0.5 0.13 155);
+}
+
+.fv-chat-import-cli .fv-ci-lines .is-imported {
+  color: var(--fv-info);
+}
+
+.fv-chat-import-cli .fv-ci-lines .is-missing {
+  color: oklch(0.56 0.13 65);
+}
+
+.dark .fv-chat-import-cli .fv-ci-lines .is-ready {
+  color: var(--fv-ok);
+}
+
+.dark .fv-chat-import-cli .fv-ci-lines .is-missing {
+  color: var(--fv-attn);
+}
+
+.fv-chat-import-cli .fv-ci-lines .is-dim {
+  color: var(--fv-dim);
+}
+
+.fv-chat-import-cli .fv-ci-lines > p {
+  animation: var(--ci-loop) var(--fv-swap) infinite both;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(1) {
+  animation-name: fv-ci-l0;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(2) {
+  animation-name: fv-ci-l1;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(3) {
+  animation-name: fv-ci-l2;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(4) {
+  animation-name: fv-ci-l3;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(5) {
+  animation-name: fv-ci-l4;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(6) {
+  animation-name: fv-ci-l5;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(7) {
+  animation-name: fv-ci-l6;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(8) {
+  animation-name: fv-ci-l7;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(9) {
+  animation-name: fv-ci-l8;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(10) {
+  animation-name: fv-ci-l9;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(11) {
+  animation-name: fv-ci-l10;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(12) {
+  animation-name: fv-ci-l11;
+}
+
+.fv-chat-import-cli .fv-ci-lines > p:nth-child(13) {
+  animation-name: fv-ci-l12;
+}
+
+@keyframes fv-ci-l0 {
+  0%,
+  3% {
+    opacity: 0;
+  }
+
+  4.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l1 {
+  0%,
+  12% {
+    opacity: 0;
+  }
+
+  13.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l2 {
+  0%,
+  14% {
+    opacity: 0;
+  }
+
+  15.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l3 {
+  0%,
+  18% {
+    opacity: 0;
+  }
+
+  19.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l4 {
+  0%,
+  20% {
+    opacity: 0;
+  }
+
+  21.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l5 {
+  0%,
+  22% {
+    opacity: 0;
+  }
+
+  23.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l6 {
+  0%,
+  24% {
+    opacity: 0;
+  }
+
+  25.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l7 {
+  0%,
+  26% {
+    opacity: 0;
+  }
+
+  27.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l8 {
+  0%,
+  40% {
+    opacity: 0;
+  }
+
+  41.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l9 {
+  0%,
+  50% {
+    opacity: 0;
+  }
+
+  51.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l10 {
+  0%,
+  53% {
+    opacity: 0;
+  }
+
+  54.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l11 {
+  0%,
+  56% {
+    opacity: 0;
+  }
+
+  57.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-ci-l12 {
+  0%,
+  60% {
+    opacity: 0;
+  }
+
+  61.5%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-chat-import-cli *,
+  .fv-chat-import-cli *::before,
+  .fv-chat-import-cli *::after {
+    animation: none !important;
+  }
+}

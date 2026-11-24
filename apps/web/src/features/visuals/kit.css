@@ -1,0 +1,189 @@
+:where(.fv-box, .fv) {
+  --fv-canvas: oklch(0.997 0.002 268);
+  --fv-ink: oklch(0.3211 0.012 268);
+  --fv-chrome: color-mix(in oklch, var(--fv-ink) 4.5%, var(--fv-canvas));
+  --fv-side: color-mix(in oklch, var(--fv-ink) 2.2%, var(--fv-canvas));
+  --fv-seam: color-mix(in oklch, var(--fv-ink) 9.5%, var(--fv-canvas));
+  --fv-hair: color-mix(in oklch, var(--fv-ink) 14.7%, var(--fv-canvas));
+  --fv-raise: color-mix(in oklch, var(--fv-ink) 3%, var(--fv-canvas));
+  --fv-select: color-mix(in oklch, var(--fv-ink) 8%, var(--fv-canvas));
+  --fv-soft: oklch(0.44 0.01 268);
+  --fv-dim: color-mix(in oklch, var(--fv-ink) 72%, var(--fv-canvas));
+  --fv-attn: oklch(0.74 0.15 80);
+  --fv-attn-text: oklch(0.52 0.11 75);
+  --fv-ok: oklch(0.62 0.15 155);
+  --fv-bad: oklch(0.56 0.2 25);
+  --fv-info: oklch(0.55 0.1 250);
+  --fv-accent: #ff4f17;
+  --fv-accent-text: oklch(0.52 0.17 37);
+  --fv-shade: color-mix(in oklab, var(--fv-ink) 22%, transparent);
+  --fv-server-text: oklch(0.5 0.15 42);
+  --fv-pop-shade: var(--fv-shade);
+  --fv-swap: cubic-bezier(0.32, 0.72, 0, 1);
+  --fv-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.dark :where(.fv-box, .fv) {
+  --fv-canvas: oklch(0.178 0.011 268);
+  --fv-ink: oklch(0.897 0.01 267);
+  --fv-chrome: oklch(0.156 0.01 268);
+  --fv-side: color-mix(in oklch, var(--fv-ink) 4.3%, var(--fv-canvas));
+  --fv-seam: color-mix(in oklch, var(--fv-ink) 11%, var(--fv-canvas));
+  --fv-hair: color-mix(in oklch, var(--fv-ink) 19%, var(--fv-canvas));
+  --fv-raise: color-mix(in oklch, var(--fv-ink) 6%, var(--fv-canvas));
+  --fv-select: color-mix(in oklch, var(--fv-ink) 12%, var(--fv-canvas));
+  --fv-soft: oklch(0.78 0.008 267);
+  --fv-dim: color-mix(in oklch, var(--fv-ink) 52%, var(--fv-canvas));
+  --fv-attn: oklch(0.8 0.15 80);
+  --fv-attn-text: oklch(0.8 0.15 80);
+  --fv-accent-text: #ff4f17;
+  --fv-ok: oklch(0.74 0.15 155);
+  --fv-bad: oklch(0.68 0.19 25);
+  --fv-info: oklch(0.76 0.11 235);
+  --fv-shade: rgb(0 0 0 / 0.55);
+  --fv-server-text: oklch(0.86 0.09 45);
+  --fv-pop-shade: rgb(0 0 0 / 0.8);
+}
+
+.fv-box {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  container-type: inline-size;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--fv-canvas);
+}
+
+.fv-box:not([data-live]) .fv *,
+.fv-box:not([data-live]) .fv *::before,
+.fv-box:not([data-live]) .fv *::after {
+  animation-play-state: paused !important;
+}
+
+.fv {
+  position: absolute;
+  inset: 0;
+  contain: layout style paint;
+  overflow: hidden;
+  background: var(--fv-canvas);
+  color: var(--fv-ink);
+  font:
+    400 max(7px, 2.5cqw) / 1.45 -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  letter-spacing: 0;
+  text-align: left;
+  -webkit-font-smoothing: antialiased;
+}
+
+.fv,
+.fv *,
+.fv *::before,
+.fv *::after {
+  box-sizing: border-box;
+}
+
+.fv :where(p, ul, ol, h3, h4, dl, dd) {
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  list-style: none;
+}
+
+.fv :where(b, strong) {
+  font-weight: 600;
+}
+
+.fv-panel {
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-raise);
+}
+
+.fv-eyebrow {
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fv-dim);
+}
+
+.fv-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.18em 0.7em;
+  border-radius: 99em;
+  background: var(--fv-select);
+  font-size: 0.86em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.fv-dot {
+  flex: none;
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.fv-dot--ok {
+  background: var(--fv-ok);
+}
+
+.fv-dot--attn {
+  background: var(--fv-attn);
+}
+
+.fv-dot--bad {
+  background: var(--fv-bad);
+}
+
+.fv-dot--dim {
+  background: var(--fv-dim);
+}
+
+.fv-mono {
+  font-family: var(--fv-mono);
+  font-size: 0.92em;
+}
+
+.fv-dim {
+  color: var(--fv-dim);
+}
+
+.fv-soft {
+  color: var(--fv-soft);
+}
+
+.fv-key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.75em;
+  height: 1.75em;
+  padding: 0 0.45em;
+  border: 1px solid var(--fv-hair);
+  border-bottom-width: 2px;
+  border-radius: 0.42em;
+  background: var(--fv-raise);
+  font-family: var(--fv-mono);
+  font-size: 0.86em;
+  line-height: 1;
+}
+
+.fv-fade::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3.2em;
+  background: linear-gradient(transparent, var(--fv-canvas));
+  pointer-events: none;
+}

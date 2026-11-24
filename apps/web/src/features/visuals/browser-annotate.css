@@ -1,0 +1,496 @@
+.fv-browser-annotate {
+  --ba-loop: 9s;
+  --ba-page: rgb(250 250 248);
+  --ba-text: rgb(28 30 36);
+  --ba-muted: rgb(110 114 124);
+  --ba-line: rgb(226 227 230);
+  --ba-pick: oklch(0.66 0.17 255);
+
+  display: flex;
+  flex-direction: column;
+  background: var(--fv-chrome);
+}
+
+.fv-browser-annotate svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-browser-annotate .fv-browser-annotate-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.8em;
+  height: 2.9em;
+  padding: 0 1em;
+  white-space: nowrap;
+}
+
+.fv-browser-annotate .fv-browser-annotate-nav {
+  display: flex;
+  gap: 0.55em;
+  color: var(--fv-dim);
+}
+
+.fv-browser-annotate .fv-browser-annotate-nav svg {
+  width: 1.05em;
+  height: 1.05em;
+}
+
+.fv-browser-annotate .fv-browser-annotate-url {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3em 0.9em;
+  border-radius: 0.55em;
+  background: var(--fv-raise);
+  color: var(--fv-soft);
+  font-size: 0.88em;
+}
+
+.fv-browser-annotate .fv-browser-annotate-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.3em 0.8em;
+  border-radius: 0.55em;
+  background: color-mix(in oklab, var(--ba-pick) 26%, transparent);
+  color: oklch(0.44 0.15 255);
+  font-size: 0.86em;
+  font-weight: 500;
+}
+
+.dark .fv-browser-annotate .fv-browser-annotate-tool {
+  color: oklch(0.86 0.08 255);
+}
+
+.fv-browser-annotate .fv-browser-annotate-tool svg {
+  width: 1.1em;
+  height: 1.1em;
+}
+
+.fv-browser-annotate .fv-browser-annotate-page {
+  position: relative;
+  flex: 1;
+  margin: 0 0.6em;
+  padding: 1.4em 2em;
+  overflow: hidden;
+  border-radius: 0.6em 0.6em 0 0;
+  background: var(--ba-page);
+  color: var(--ba-text);
+}
+
+.fv-browser-annotate .fv-browser-annotate-page h3 {
+  font-size: 1.3em;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.fv-browser-annotate .fv-browser-annotate-sub {
+  margin-bottom: 1.4em;
+  color: var(--ba-muted);
+  font-size: 0.86em;
+}
+
+.fv-browser-annotate .fv-browser-annotate-new,
+.fv-browser-annotate .fv-browser-annotate-export {
+  position: absolute;
+  top: 1.6em;
+  display: grid;
+  place-items: center;
+  height: 2em;
+  border-radius: 0.5em;
+  font-size: 0.88em;
+  font-weight: 550;
+}
+
+.fv-browser-annotate .fv-browser-annotate-new {
+  right: 10.3em;
+  width: 7.4em;
+  background: var(--ba-text);
+  color: var(--ba-page);
+}
+
+.fv-browser-annotate .fv-browser-annotate-export {
+  right: 2.25em;
+  width: 7.4em;
+  border: 1px solid var(--ba-line);
+  background: #fff;
+}
+
+.fv-browser-annotate .fv-browser-annotate-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.fv-browser-annotate .fv-browser-annotate-page td {
+  padding: 0.6em 0;
+  border-top: 1px solid var(--ba-line);
+  white-space: nowrap;
+}
+
+.fv-browser-annotate .fv-browser-annotate-page td:first-child {
+  color: var(--ba-muted);
+  font-family: var(--fv-mono);
+  font-size: 0.92em;
+}
+
+.fv-browser-annotate .fv-browser-annotate-page td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-browser-annotate .fv-browser-annotate-hover {
+  position: absolute;
+  top: 1.15em;
+  right: 1.75em;
+  width: 6.95em;
+  height: 2.25em;
+  border: 2px solid var(--ba-pick);
+  border-radius: 0.6em;
+  background: color-mix(in oklab, var(--ba-pick) 10%, transparent);
+}
+
+.fv-browser-annotate .fv-browser-annotate-tag {
+  position: absolute;
+  top: 0;
+  right: 2.43em;
+  padding: 0.05em 0.5em;
+  border-radius: 0.3em;
+  background: var(--ba-pick);
+  color: #fff;
+  font-family: var(--fv-mono);
+  font-size: 0.72em;
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.fv-browser-annotate .fv-browser-annotate-marker {
+  position: absolute;
+  top: 1em;
+  right: 9.85em;
+  display: grid;
+  place-items: center;
+  width: 1.5em;
+  height: 1.5em;
+  border: 2px solid var(--ba-page);
+  border-radius: 50%;
+  background: var(--ba-pick);
+  color: #fff;
+  font-size: 0.8em;
+  font-weight: 700;
+}
+
+.fv-browser-annotate .fv-browser-annotate-note {
+  position: absolute;
+  top: 4.3em;
+  right: 1.75em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  width: 17em;
+  padding: 0.75em 0.85em;
+  border: 1px solid var(--ba-line);
+  border-radius: 0.7em;
+  background: #fff;
+  box-shadow: 0 1em 2.4em -0.8em rgb(20 24 40 / 0.35);
+  opacity: 0;
+}
+
+.fv-browser-annotate .fv-browser-annotate-note > p {
+  color: var(--ba-muted);
+  font-family: var(--fv-mono);
+  font-size: 0.78em;
+}
+
+.fv-browser-annotate .fv-browser-annotate-field {
+  position: relative;
+  display: block;
+  padding: 0.45em 0.6em;
+  overflow: hidden;
+  border: 1px solid var(--ba-pick);
+  border-radius: 0.45em;
+  font-size: 0.88em;
+  white-space: nowrap;
+}
+
+.fv-browser-annotate .fv-browser-annotate-cover {
+  position: absolute;
+  inset: 0.2em 0.2em 0.2em 0.5em;
+  background: #fff;
+  transform: scaleX(0);
+  transform-origin: right;
+}
+
+.fv-browser-annotate .fv-browser-annotate-note footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4em;
+  font-size: 0.84em;
+}
+
+.fv-browser-annotate .fv-browser-annotate-note footer span {
+  padding: 0.25em 0.7em;
+  border-radius: 0.4em;
+  color: var(--ba-muted);
+}
+
+.fv-browser-annotate .fv-browser-annotate-note footer .is-primary {
+  background: var(--ba-pick);
+  color: #fff;
+  font-weight: 550;
+}
+
+.fv-browser-annotate .fv-browser-annotate-cursor {
+  position: absolute;
+  top: 2.7em;
+  left: calc(100% - 5.2em);
+  width: 1.5em;
+  height: 1.5em;
+  fill: #111;
+  stroke: #fff;
+  stroke-width: 1.1;
+  filter: drop-shadow(0 0.1em 0.2em rgb(0 0 0 / 0.35));
+  opacity: 0;
+}
+
+.fv-browser-annotate .fv-browser-annotate-composer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.7em;
+  height: 3.3em;
+  margin: 0 0.6em 0.6em;
+  padding: 0 1em;
+  border: 1px solid var(--fv-hair);
+  border-top: 0;
+  border-radius: 0 0 0.9em 0.9em;
+  background: var(--fv-canvas);
+  white-space: nowrap;
+}
+
+.fv-browser-annotate .fv-browser-annotate-chip {
+  padding: 0.15em 0.6em;
+  border-radius: 0.4em;
+  background: color-mix(in oklab, var(--ba-pick) 24%, transparent);
+  color: oklch(0.44 0.15 255);
+  font-family: var(--fv-mono);
+  font-size: 0.82em;
+}
+
+.dark .fv-browser-annotate .fv-browser-annotate-chip {
+  color: oklch(0.88 0.07 255);
+}
+
+.fv-browser-annotate .fv-browser-annotate-placeholder {
+  color: var(--fv-dim);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-browser-annotate .fv-browser-annotate-cursor {
+    animation: fv-browser-annotate-cursor var(--ba-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-browser-annotate .fv-browser-annotate-hover {
+    animation: fv-browser-annotate-hover var(--ba-loop) linear infinite;
+  }
+
+  .fv-browser-annotate .fv-browser-annotate-tag {
+    animation: fv-browser-annotate-tag var(--ba-loop) linear infinite;
+  }
+
+  .fv-browser-annotate .fv-browser-annotate-marker {
+    animation: fv-browser-annotate-marker var(--ba-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-browser-annotate .fv-browser-annotate-note {
+    animation: fv-browser-annotate-note var(--ba-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-browser-annotate .fv-browser-annotate-cover {
+    animation: fv-browser-annotate-type var(--ba-loop) steps(28, end) infinite;
+  }
+
+  .fv-browser-annotate .fv-browser-annotate-note footer .is-primary {
+    animation: fv-browser-annotate-press var(--ba-loop) linear infinite;
+  }
+
+  .fv-browser-annotate .fv-browser-annotate-chip {
+    animation: fv-browser-annotate-chip var(--ba-loop) var(--fv-swap) infinite;
+  }
+}
+
+@keyframes fv-browser-annotate-cursor {
+  0% {
+    opacity: 0;
+    transform: translate(-18em, 9em);
+  }
+
+  4% {
+    opacity: 1;
+    transform: translate(-18em, 9em);
+  }
+
+  14%,
+  20% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  22% {
+    transform: translate(0, 0) scale(0.85);
+  }
+
+  24%,
+  46% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  54%,
+  56% {
+    opacity: 1;
+    transform: translate(-0.4em, 7.4em) scale(1);
+  }
+
+  58% {
+    transform: translate(-0.4em, 7.4em) scale(0.85);
+  }
+
+  60%,
+  70% {
+    opacity: 1;
+    transform: translate(-0.4em, 7.4em) scale(1);
+  }
+
+  76%,
+  100% {
+    opacity: 0;
+    transform: translate(-6em, 9em);
+  }
+}
+
+@keyframes fv-browser-annotate-hover {
+  0%,
+  12% {
+    opacity: 0;
+  }
+
+  15%,
+  94% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-browser-annotate-tag {
+  0%,
+  12% {
+    opacity: 0;
+  }
+
+  15%,
+  22% {
+    opacity: 1;
+  }
+
+  25%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-browser-annotate-marker {
+  0%,
+  22% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+
+  26%,
+  94% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+@keyframes fv-browser-annotate-note {
+  0%,
+  23% {
+    opacity: 0;
+    transform: translateY(-0.5em);
+  }
+
+  27%,
+  58% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  62%,
+  100% {
+    opacity: 0;
+    transform: translateY(-0.3em);
+  }
+}
+
+@keyframes fv-browser-annotate-type {
+  0%,
+  28% {
+    transform: scaleX(1);
+  }
+
+  48%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes fv-browser-annotate-press {
+  0%,
+  56% {
+    transform: scale(1);
+  }
+
+  58% {
+    transform: scale(0.92);
+  }
+
+  60%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes fv-browser-annotate-chip {
+  0%,
+  60% {
+    opacity: 0;
+    transform: translateY(0.6em);
+  }
+
+  65%,
+  94% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}

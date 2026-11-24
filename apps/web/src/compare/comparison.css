@@ -1,0 +1,358 @@
+.vs-checked {
+  max-width: 84ch;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.fx .vs-checked a {
+  color: var(--fg);
+  text-decoration-color: color-mix(in oklab, var(--fg) 30%, transparent);
+  text-underline-offset: 3px;
+}
+
+.fx .vs-checked a:hover {
+  text-decoration-color: var(--accent);
+}
+
+.vs-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  max-width: 760px;
+}
+
+.vs-head h2,
+.vs-picks h2,
+.vs-sources h2 {
+  font-family: var(--display);
+  font-size: clamp(26px, 3vw, 42px);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.vs-head p {
+  font-size: 17px;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+.vs-head .get-set {
+  margin-top: 8px;
+}
+
+.vs-tables {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(32px, 4.4vw, 56px);
+  scroll-margin-top: 90px;
+}
+
+.vs-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.vs-table caption {
+  padding-bottom: 14px;
+  font-family: var(--display);
+  font-size: clamp(20px, 2vw, 26px);
+  font-weight: 680;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  text-align: left;
+}
+
+.vs-table thead td {
+  width: 22%;
+}
+
+.vs-table thead :where(td, th) {
+  position: sticky;
+  top: 68px;
+  z-index: 1;
+  padding: 12px 20px;
+  background: var(--bg);
+  box-shadow: inset 0 -2px 0 var(--fg);
+}
+
+.vs-table thead th {
+  font-size: 15px;
+  font-weight: 640;
+  letter-spacing: -0.005em;
+  text-align: left;
+}
+
+.vs-table thead small {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.vs-table tbody tr {
+  border-bottom: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
+}
+
+.vs-table tbody :where(th, td) {
+  padding: 15px 20px;
+  font-size: 15.5px;
+  line-height: 1.5;
+  text-align: left;
+  vertical-align: top;
+  text-wrap: pretty;
+}
+
+.vs-table tbody th {
+  padding-left: 0;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.vs-table tbody td {
+  border-left: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
+  color: color-mix(in oklab, var(--fg) 78%, var(--bg));
+  overflow-wrap: anywhere;
+}
+
+.fx .vs-table a {
+  color: var(--fg);
+  text-decoration-color: color-mix(in oklab, var(--fg) 30%, transparent);
+  text-underline-offset: 3px;
+}
+
+.fx .vs-table a:hover {
+  text-decoration-color: var(--accent);
+}
+
+.vs-cite {
+  margin-left: 2px;
+  font-family: var(--mono);
+  font-size: 0.68em;
+  line-height: 0;
+  color: var(--muted);
+}
+
+.vs-table tbody a {
+  scroll-margin-top: 124px;
+}
+
+.fx .vs-cite a {
+  padding: 14px 5px;
+  margin: 0 -5px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.fx .vs-cite a:hover,
+.fx .vs-cite a:focus-visible {
+  color: var(--accent);
+}
+
+.vs-picks {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.vs-picks > ul {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(14px, 2vw, 24px);
+}
+
+.vs-picks > ul > li {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: clamp(20px, 2.4vw, 28px);
+  border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
+  border-radius: 20px;
+  background: color-mix(in oklab, var(--fg) 2.5%, transparent);
+}
+
+.vs-picks > ul > li:last-child {
+  --fg: var(--paper);
+  --bg: var(--ink);
+  --muted: color-mix(in oklab, var(--paper) 68%, var(--ink));
+
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.vs-picks h3 {
+  font-family: var(--display);
+  font-size: clamp(19px, 1.8vw, 23px);
+  font-weight: 680;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.vs-picks li ul {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.vs-picks li li {
+  position: relative;
+  padding-left: 20px;
+  font-size: 15.5px;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+.vs-picks li li::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 0.62em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.fx .vs-pick-link {
+  align-self: flex-start;
+  margin-top: auto;
+  padding-bottom: 3px;
+  border-bottom: 1px solid color-mix(in oklab, var(--fg) 30%, transparent);
+  color: var(--fg);
+  font-weight: 560;
+  text-decoration: none;
+  transition: border-color 0.2s var(--ease);
+}
+
+.fx .vs-pick-link:hover {
+  border-color: var(--accent);
+}
+
+.fx .vs-pick-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.vs-together {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(32px, 5vw, 64px);
+  scroll-margin-top: 90px;
+}
+
+.vs-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 860px;
+  scroll-margin-top: 90px;
+}
+
+.vs-sources p {
+  color: var(--muted);
+}
+
+.vs-sources ol {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-left: 30px;
+  font-size: 14.5px;
+  list-style: decimal;
+}
+
+.vs-sources li {
+  padding-left: 4px;
+  scroll-margin-top: 96px;
+  overflow-wrap: anywhere;
+}
+
+.vs-sources li::marker {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.vs-sources li:target {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent) 14%, transparent);
+  border-radius: 2px;
+}
+
+@media (max-width: 860px) {
+  .vs-table thead :where(td, th) {
+    top: 60px;
+  }
+
+  .vs-picks > ul {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .vs-table,
+  .vs-table caption,
+  .vs-table tbody,
+  .vs-table tbody tr,
+  .vs-table tbody th,
+  .vs-table tbody td {
+    display: block;
+  }
+
+  .vs-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .vs-table caption {
+    padding-bottom: 4px;
+    border-bottom: 2px solid var(--fg);
+  }
+
+  .vs-table caption::after {
+    content: "";
+    display: block;
+    height: 10px;
+  }
+
+  .vs-table tbody tr {
+    padding: 14px 0 12px;
+  }
+
+  .vs-table tbody th {
+    padding: 0 0 8px;
+    font-size: 16px;
+  }
+
+  .vs-table tbody td {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 12px;
+    padding: 5px 0;
+    border-left: 0;
+    font-size: 15px;
+  }
+
+  .vs-table tbody td::before {
+    content: attr(data-side);
+    padding-top: 3px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+}

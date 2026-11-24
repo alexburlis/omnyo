@@ -1,0 +1,487 @@
+.dark .fv.fv-claude-code-gui-diff {
+  --cd-add: oklch(0.77 0.17 155);
+  --cd-del: oklch(0.72 0.19 22);
+}
+
+.fv.fv-claude-code-gui-diff {
+  --cd-loop: 8s;
+  --cd-add: oklch(0.4 0.13 163);
+  --cd-del: oklch(0.45 0.17 28);
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-claude-code-gui-diff .fv-cd-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  height: 2.6em;
+  padding: 0 1em;
+  border-bottom: 1px solid var(--fv-seam);
+}
+
+.fv-claude-code-gui-diff .fv-cd-bar b {
+  font-weight: 600;
+}
+
+.fv-claude-code-gui-diff .fv-cd-count {
+  display: inline-grid;
+  font-size: 0.8em;
+  color: var(--fv-dim);
+}
+
+.fv-claude-code-gui-diff .fv-cd-count > span {
+  grid-area: 1 / 1;
+}
+
+.fv-claude-code-gui-diff .fv-cd-count > .is-a {
+  opacity: 0;
+}
+
+.fv-claude-code-gui-diff .fv-cd-seg {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-left: auto;
+  padding: 0.15em;
+  border-radius: 0.6em;
+  background: var(--fv-canvas);
+  font-size: 0.78em;
+}
+
+.fv-claude-code-gui-diff .fv-cd-seg span {
+  position: relative;
+  padding: 0.2em 0.8em;
+  text-align: center;
+}
+
+.fv-claude-code-gui-diff .fv-cd-seg i {
+  position: absolute;
+  top: 0.15em;
+  bottom: 0.15em;
+  left: 0.15em;
+  width: calc(50% - 0.15em);
+  border-radius: 0.45em;
+  background: var(--fv-select);
+  transform: translateX(100%);
+}
+
+.fv-claude-code-gui-diff .fv-cd-filter {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  padding: 0 0.6em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.55em;
+  background: var(--fv-canvas);
+  font-family: var(--fv-mono);
+  font-size: 0.86em;
+  width: calc(11.4em / 0.86);
+  height: calc(1.9em / 0.86);
+  top: calc(3.2em / 0.86);
+  left: calc(1em / 0.86);
+}
+
+.fv-claude-code-gui-diff .fv-cd-filter svg {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  margin-right: 0.5em;
+  fill: none;
+  stroke: var(--fv-dim);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter {
+  display: inline-block;
+  width: 0.6em;
+}
+
+.fv-claude-code-gui-diff .fv-cd-placeholder {
+  position: absolute;
+  left: 2.2em;
+  font-family: inherit;
+  font-style: normal;
+  color: var(--fv-dim);
+  opacity: 0;
+}
+
+.fv-claude-code-gui-diff .fv-cd-files {
+  position: absolute;
+  top: 5.8em;
+  left: 1em;
+  width: 11.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+}
+
+.fv-claude-code-gui-diff .fv-cd-files li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.4em;
+  padding: 0.35em 0.55em;
+  border-radius: 0.5em;
+  font-size: 0.78em;
+}
+
+.fv-claude-code-gui-diff .fv-cd-files li.is-on {
+  background: var(--fv-select);
+}
+
+.fv-claude-code-gui-diff .fv-cd-files li.is-out {
+  opacity: 0;
+}
+
+.fv-claude-code-gui-diff .fv-cd-files span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-claude-code-gui-diff .fv-cd-files b,
+.fv-claude-code-gui-diff .fv-cd-files em {
+  font-family: var(--fv-mono);
+  font-size: 0.9em;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.fv-claude-code-gui-diff .fv-cd-files b {
+  color: var(--cd-add);
+}
+
+.fv-claude-code-gui-diff .fv-cd-files em {
+  color: var(--cd-del);
+}
+
+.fv-claude-code-gui-diff .fv-cd-view {
+  position: absolute;
+  top: 3.2em;
+  left: 13.3em;
+  right: 1em;
+  bottom: 1em;
+  overflow: hidden;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.8em;
+  background: var(--fv-canvas);
+}
+
+.fv-claude-code-gui-diff .fv-cd-file {
+  padding: 0.5em 0.8em;
+  border-bottom: 1px solid var(--fv-seam);
+  font-size: 0.74em;
+  color: var(--fv-soft);
+}
+
+.fv-claude-code-gui-diff :is(.fv-cd-stacked, .fv-cd-split) {
+  position: absolute;
+  top: 2.2em;
+  left: 0;
+  right: 0;
+  padding-top: 0.4em;
+  font-size: 0.7em;
+  line-height: 1.85;
+}
+
+.fv-claude-code-gui-diff .fv-cd-stacked {
+  opacity: 0;
+}
+
+.fv-claude-code-gui-diff .fv-cd-split {
+  top: calc(2.2em / 0.7);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.fv-claude-code-gui-diff .fv-cd-stacked {
+  top: calc(2.2em / 0.7);
+}
+
+.fv-claude-code-gui-diff .fv-cd-split > div + div {
+  border-left: 1px solid var(--fv-seam);
+}
+
+.fv-claude-code-gui-diff .fv-cd-view p {
+  display: grid;
+  grid-template-columns: 2.4em 1.2em 1fr;
+  white-space: nowrap;
+}
+
+.fv-claude-code-gui-diff .fv-cd-view p span {
+  padding-right: 0.6em;
+  text-align: right;
+  color: var(--fv-dim);
+}
+
+.fv-claude-code-gui-diff .fv-cd-view p i {
+  font-style: normal;
+}
+
+.fv-claude-code-gui-diff .fv-cd-view p code {
+  overflow: hidden;
+  font: inherit;
+  text-overflow: ellipsis;
+  color: var(--fv-soft);
+}
+
+.fv-claude-code-gui-diff .fv-cd-view p code.is-in {
+  padding-left: 1.2em;
+}
+
+.fv-claude-code-gui-diff .fv-cd-view p.is-add {
+  background: color-mix(in oklab, var(--cd-add) 14%, transparent);
+}
+
+.fv-claude-code-gui-diff .fv-cd-view p.is-add :is(i, code) {
+  color: var(--cd-add);
+}
+
+.fv-claude-code-gui-diff .fv-cd-view p.is-del {
+  background: color-mix(in oklab, var(--cd-del) 14%, transparent);
+}
+
+.fv-claude-code-gui-diff .fv-cd-view p.is-del :is(i, code) {
+  color: var(--cd-del);
+}
+
+.fv-claude-code-gui-diff
+  :where(
+    .fv-cd-count > span,
+    .fv-cd-seg i,
+    .fv-cd-letter,
+    .fv-cd-placeholder,
+    .fv-cd-files li.is-out,
+    .fv-cd-stacked,
+    .fv-cd-split
+  ) {
+  animation: var(--cd-loop) var(--fv-swap) infinite both;
+}
+
+.fv-claude-code-gui-diff .fv-cd-count > .is-a {
+  animation-name: fv-cd-count-a;
+}
+
+.fv-claude-code-gui-diff .fv-cd-count > .is-b {
+  animation-name: fv-cd-count-b;
+}
+
+.fv-claude-code-gui-diff .fv-cd-seg i {
+  animation-name: fv-cd-seg;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter {
+  animation-name: fv-cd-letter;
+  animation-timing-function: linear;
+}
+
+.fv-claude-code-gui-diff .fv-cd-placeholder {
+  animation-name: fv-cd-placeholder;
+}
+
+.fv-claude-code-gui-diff .fv-cd-files li.is-out {
+  animation-name: fv-cd-out;
+}
+
+.fv-claude-code-gui-diff .fv-cd-stacked {
+  animation-name: fv-cd-stacked;
+}
+
+.fv-claude-code-gui-diff .fv-cd-split {
+  animation-name: fv-cd-split;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter.is-q1 {
+  animation-delay: 0.14s;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter.is-q2 {
+  animation-delay: 0.28s;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter.is-q3 {
+  animation-delay: 0.42s;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter.is-q4 {
+  animation-delay: 0.56s;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter.is-q5 {
+  animation-delay: 0.7s;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter.is-q6 {
+  animation-delay: 0.84s;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter.is-q7 {
+  animation-delay: 0.98s;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter.is-q8 {
+  animation-delay: 1.12s;
+}
+
+.fv-claude-code-gui-diff .fv-cd-letter.is-q9 {
+  animation-delay: 1.26s;
+}
+
+@keyframes fv-cd-letter {
+  0%,
+  11.9% {
+    opacity: 0;
+  }
+
+  12%,
+  78% {
+    opacity: 1;
+  }
+
+  79%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-cd-placeholder {
+  0%,
+  10% {
+    opacity: 1;
+  }
+
+  11.9%,
+  95% {
+    opacity: 0;
+  }
+
+  98%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-cd-out {
+  0%,
+  29% {
+    opacity: 1;
+    transform: none;
+  }
+
+  34%,
+  88% {
+    opacity: 0;
+    transform: translateX(-12%);
+  }
+
+  94%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-cd-count-a {
+  0%,
+  30% {
+    opacity: 1;
+  }
+
+  33%,
+  90% {
+    opacity: 0;
+  }
+
+  94%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-cd-count-b {
+  0%,
+  30% {
+    opacity: 0;
+  }
+
+  33%,
+  90% {
+    opacity: 1;
+  }
+
+  94%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-cd-seg {
+  0%,
+  50% {
+    transform: none;
+  }
+
+  55%,
+  92% {
+    transform: translateX(100%);
+  }
+
+  97%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-cd-stacked {
+  0%,
+  50% {
+    opacity: 1;
+    transform: none;
+  }
+
+  56%,
+  92% {
+    opacity: 0;
+    transform: translateX(-4%);
+  }
+
+  97%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-cd-split {
+  0%,
+  51% {
+    opacity: 0;
+    transform: translateX(4%);
+  }
+
+  57%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateX(4%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-claude-code-gui-diff *,
+  .fv-claude-code-gui-diff *::before,
+  .fv-claude-code-gui-diff *::after {
+    animation: none !important;
+  }
+}

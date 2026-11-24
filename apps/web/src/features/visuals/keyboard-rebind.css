@@ -1,0 +1,201 @@
+.fv-keyboard-rebind {
+  --kr-loop: 8s;
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  padding: 1.5em 2.6em 0;
+  background:
+    radial-gradient(55% 45% at 85% 0, rgb(150 200 255 / 0.05), transparent),
+    var(--fv-canvas);
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-head h3 {
+  font-size: 1.2em;
+  font-weight: 600;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-head p {
+  color: var(--fv-dim);
+  font-size: 0.86em;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-reset {
+  padding: 0.3em 0.8em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.5em;
+  color: var(--fv-soft);
+  font-size: 0.84em;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-search {
+  padding: 0.45em 0.9em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.6em;
+  color: var(--fv-dim);
+  font-size: 0.9em;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-group {
+  margin-top: 0.3em;
+  color: var(--fv-dim);
+  font-size: 0.8em;
+  font-weight: 500;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-rows li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 2.55em;
+  border-bottom: 1px solid var(--fv-seam);
+  white-space: nowrap;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-keys,
+.fv-keyboard-rebind .fv-keyboard-rebind-slot > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2em;
+  min-width: 6.4em;
+  height: 1.95em;
+  padding: 0 0.5em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.5em;
+}
+
+.fv-keyboard-rebind .fv-key {
+  min-width: 1.55em;
+  height: 1.55em;
+  border-bottom-width: 1px;
+  font-size: 0.8em;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-slot {
+  display: inline-grid;
+  justify-items: end;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-slot > span {
+  grid-area: 1 / 1;
+  font-size: 0.86em;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-slot .is-empty {
+  color: var(--fv-dim);
+  opacity: 0;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-slot .is-recording {
+  border-color: var(--fv-info);
+  color: var(--fv-ink);
+  box-shadow: 0 0 0 0.2em color-mix(in oklab, var(--fv-info) 22%, transparent);
+  opacity: 0;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-slot .is-set {
+  gap: 0.25em;
+  border-color: transparent;
+  font-size: 1em;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-slot .is-set svg {
+  width: 1.05em;
+  height: 1.05em;
+  margin-left: 0.35em;
+  fill: none;
+  stroke: var(--fv-dim);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-keyboard-rebind .fv-keyboard-rebind-slot .is-set .fv-key {
+  border-color: color-mix(in oklab, var(--fv-ok) 55%, var(--fv-hair));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-keyboard-rebind .fv-keyboard-rebind-slot .is-empty {
+    animation: fv-keyboard-rebind-empty var(--kr-loop) linear infinite;
+  }
+
+  .fv-keyboard-rebind .fv-keyboard-rebind-slot .is-recording {
+    animation: fv-keyboard-rebind-recording var(--kr-loop) linear infinite;
+  }
+
+  .fv-keyboard-rebind .fv-keyboard-rebind-slot .is-set {
+    animation: fv-keyboard-rebind-set var(--kr-loop) var(--fv-swap) infinite;
+  }
+}
+
+@keyframes fv-keyboard-rebind-empty {
+  0%,
+  22% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  24% {
+    opacity: 1;
+    transform: scale(0.94);
+  }
+
+  26%,
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+@keyframes fv-keyboard-rebind-recording {
+  0%,
+  25% {
+    opacity: 0;
+  }
+
+  27%,
+  37% {
+    opacity: 1;
+  }
+
+  39% {
+    opacity: 0.5;
+  }
+
+  41%,
+  52% {
+    opacity: 1;
+  }
+
+  54%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-keyboard-rebind-set {
+  0%,
+  53% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+
+  58%,
+  94% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}

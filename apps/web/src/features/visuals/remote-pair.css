@@ -1,0 +1,374 @@
+.fv-remote-pair {
+  --rp-loop: 9s;
+  --rp-glow: color-mix(in oklab, var(--fv-accent) 3%, transparent);
+  --rp-lift: color-mix(in oklab, var(--fv-ink) 22%, transparent);
+
+  background:
+    radial-gradient(45% 60% at 80% 50%, var(--rp-glow), transparent),
+    var(--fv-chrome);
+}
+
+.dark .fv-remote-pair {
+  --rp-glow: rgb(255 200 150 / 0.07);
+  --rp-lift: rgb(0 0 0 / 0.7);
+}
+
+.fv-remote-pair svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-remote-pair .fv-remote-pair-settings {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 24.5em;
+  padding: 1.6em 1.8em;
+  border-right: 1px solid var(--fv-seam);
+  background: var(--fv-canvas);
+}
+
+.fv-remote-pair .fv-remote-pair-settings h3 {
+  margin-bottom: 0.9em;
+  font-size: 1.25em;
+  font-weight: 600;
+}
+
+.fv-remote-pair .fv-remote-pair-card {
+  padding: 0.9em 1em 1em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.8em;
+  background: var(--fv-raise);
+}
+
+.fv-remote-pair .fv-remote-pair-title {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.8em;
+  font-size: 0.9em;
+}
+
+.fv-remote-pair .fv-remote-pair-title b {
+  font-weight: 600;
+}
+
+.fv-remote-pair .fv-remote-pair-title span {
+  color: var(--fv-dim);
+}
+
+.fv-remote-pair .fv-remote-pair-body {
+  display: flex;
+  gap: 1em;
+}
+
+.fv-remote-pair .fv-remote-pair-qr {
+  flex: none;
+  width: 8.4em;
+  height: 8.4em;
+  padding: 0.35em;
+  border-radius: 0.5em;
+  background: #fff;
+}
+
+.fv-remote-pair .fv-remote-pair-qr path {
+  fill: rgb(18 18 20);
+  stroke: none;
+}
+
+.fv-remote-pair .fv-remote-pair-body > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  min-width: 0;
+}
+
+.fv-remote-pair .fv-remote-pair-hint {
+  font-size: 0.84em;
+  line-height: 1.35;
+}
+
+.fv-remote-pair .fv-remote-pair-code {
+  padding: 0.35em 0.7em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.6em;
+  background: var(--fv-chrome);
+  font-family: var(--fv-mono);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+.fv-remote-pair .fv-remote-pair-timer,
+.fv-remote-pair .fv-remote-pair-small {
+  color: var(--fv-dim);
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+
+.fv-remote-pair .fv-remote-pair-clock {
+  display: inline-block;
+  height: 1.45em;
+  overflow: hidden;
+  vertical-align: bottom;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-remote-pair .fv-remote-pair-clock > span {
+  display: flex;
+  flex-direction: column;
+  transform: translateY(-11.6em);
+}
+
+.fv-remote-pair .fv-remote-pair-phone {
+  position: absolute;
+  top: 1.1em;
+  right: 3.2em;
+  width: 11.8em;
+  height: 22.8em;
+  padding: 0.45em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 2em;
+  background: oklch(0.12 0.008 268);
+  box-shadow: 0 1.6em 3em -1em var(--rp-lift);
+}
+
+.fv-remote-pair .fv-remote-pair-screen {
+  position: relative;
+  display: grid;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 1.6em;
+  background: var(--fv-canvas);
+  font-size: 0.8em;
+}
+
+.fv-remote-pair .fv-remote-pair-screen > div {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  padding: 3em 1.1em 1em;
+}
+
+.fv-remote-pair .fv-remote-pair-form {
+  opacity: 0;
+}
+
+.fv-remote-pair .fv-remote-pair-form b,
+.fv-remote-pair .fv-remote-pair-done b {
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.fv-remote-pair .fv-remote-pair-form p {
+  color: var(--fv-dim);
+  font-size: 0.9em;
+  line-height: 1.35;
+}
+
+.fv-remote-pair .fv-remote-pair-field {
+  position: relative;
+  display: block;
+  padding: 0.6em 0.8em;
+  overflow: hidden;
+  border: 1px solid var(--fv-info);
+  border-radius: 0.6em;
+  font-family: var(--fv-mono);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.fv-remote-pair .fv-remote-pair-field i {
+  position: absolute;
+  inset: 0.3em 0.3em 0.3em 0.7em;
+  background: var(--fv-canvas);
+  transform: scaleX(0);
+  transform-origin: right;
+}
+
+.fv-remote-pair .fv-remote-pair-button {
+  display: grid;
+  padding: 0.6em;
+  border-radius: 0.6em;
+  background: var(--fv-ink);
+  color: var(--fv-canvas);
+  font-weight: 600;
+  text-align: center;
+}
+
+.fv-remote-pair .fv-remote-pair-button > span {
+  grid-area: 1 / 1;
+}
+
+.fv-remote-pair .fv-remote-pair-button > .is-busy {
+  opacity: 0;
+}
+
+.fv-remote-pair .fv-remote-pair-done {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.fv-remote-pair .fv-remote-pair-done svg {
+  width: 2.6em;
+  height: 2.6em;
+  color: var(--fv-ok);
+}
+
+.fv-remote-pair .fv-remote-pair-server {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-top: 0.6em;
+  padding: 0.6em 0.8em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.7em;
+  background: var(--fv-raise);
+  text-align: left;
+}
+
+.fv-remote-pair .fv-remote-pair-server span {
+  font-weight: 560;
+}
+
+.fv-remote-pair .fv-remote-pair-server small {
+  color: var(--fv-dim);
+  font-size: 0.85em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-remote-pair .fv-remote-pair-clock > span {
+    animation: fv-remote-pair-tick var(--rp-loop) steps(8, end) infinite;
+  }
+
+  .fv-remote-pair .fv-remote-pair-form {
+    animation: fv-remote-pair-form var(--rp-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-remote-pair .fv-remote-pair-field i {
+    animation: fv-remote-pair-type var(--rp-loop) steps(9, end) infinite;
+  }
+
+  .fv-remote-pair .fv-remote-pair-button {
+    animation: fv-remote-pair-press var(--rp-loop) linear infinite;
+  }
+
+  .fv-remote-pair .fv-remote-pair-button > .is-idle {
+    animation: fv-remote-pair-idle var(--rp-loop) linear infinite;
+  }
+
+  .fv-remote-pair .fv-remote-pair-button > .is-busy {
+    animation: fv-remote-pair-busy var(--rp-loop) linear infinite;
+  }
+
+  .fv-remote-pair .fv-remote-pair-done {
+    animation: fv-remote-pair-done var(--rp-loop) var(--fv-swap) infinite;
+  }
+}
+
+@keyframes fv-remote-pair-tick {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(-11.6em);
+  }
+}
+
+@keyframes fv-remote-pair-form {
+  0%,
+  54% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  58%,
+  96% {
+    opacity: 0;
+    transform: translateY(-0.6em);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fv-remote-pair-type {
+  0%,
+  10% {
+    transform: scaleX(1);
+  }
+
+  32%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes fv-remote-pair-press {
+  0%,
+  36% {
+    transform: scale(1);
+  }
+
+  38% {
+    transform: scale(0.94);
+  }
+
+  40%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes fv-remote-pair-idle {
+  0%,
+  38% {
+    opacity: 1;
+  }
+
+  40%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-remote-pair-busy {
+  0%,
+  38% {
+    opacity: 0;
+  }
+
+  40%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-remote-pair-done {
+  0%,
+  55% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  60%,
+  94% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}

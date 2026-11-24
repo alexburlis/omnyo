@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "publisher": "omnyo",
+  "slug": "product-update-review",
+  "version": "1.0.0",
+  "title": "Product Update Review",
+  "description": "Check a product announcement against your release evidence and revise its claims.",
+  "license": "MIT",
+  "skills": [
+    {
+      "id": "review-product-update",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "content": "---\nname: review-product-update\ndescription: Review a product announcement against supplied release evidence and draft an accurate revision.\nlicense: MIT\n---\n\n# Review a product update\n\nStart with the intended readers, the draft and the evidence supplied for this release. Match every claim to an available source. Use the check-release-claims method when the draft contains several factual or availability claims. Treat plans, local checks and published behavior as distinct evidence.\n\nReport claims that need a correction and what evidence is missing. Then draft a concise revision that leads with the practical change for the reader. Retain valid limits, availability details and version information. Keep the output as a draft.\n"
+        }
+      ]
+    },
+    {
+      "id": "check-release-claims",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "content": "---\nname: check-release-claims\ndescription: Check release claims against supplied build, test or publication evidence.\nlicense: MIT\n---\n\n# Check release claims\n\nList each factual claim with its supporting source. Read the evidence for the exact version, platform and audience the claim names. Record the claims that lack support and give the narrowest correction the evidence allows. Treat missing evidence as unknown.\n"
+        }
+      ]
+    }
+  ],
+  "prompts": [
+    {
+      "title": "Review this release draft",
+      "body": "Review [announcement draft] for [reader] using [release evidence]. Point out unsupported claims, then revise the draft using the evidence available.",
+      "skillId": "review-product-update"
+    }
+  ]
+}

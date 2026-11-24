@@ -1,0 +1,413 @@
+.fv.fv-parallel-agents-cleanup {
+  --pc-loop: 8s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-parallel-agents-cleanup .fv-pc-toast {
+  position: absolute;
+  top: 0.9em;
+  left: 0.9em;
+  right: 0.9em;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.5em 0.9em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.7em;
+  background: var(--fv-canvas);
+  font-size: 0.84em;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-toast b {
+  font-weight: 560;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-timer {
+  position: relative;
+  flex: 1;
+  height: 0.3em;
+  overflow: hidden;
+  margin-left: 0.6em;
+  border-radius: 99em;
+  background: var(--fv-seam);
+}
+
+.fv-parallel-agents-cleanup .fv-pc-timer i {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--fv-attn);
+  transform-origin: left;
+  transform: scaleX(0);
+}
+
+.fv-parallel-agents-cleanup .fv-pc-clock {
+  display: grid;
+  min-width: 2.6em;
+  font-family: var(--fv-mono);
+  font-size: 0.9em;
+  color: var(--fv-soft);
+}
+
+.fv-parallel-agents-cleanup .fv-pc-clock > span {
+  grid-area: 1 / 1;
+  text-align: right;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-clock > :not(.is-0) {
+  opacity: 0;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-card {
+  position: absolute;
+  top: 4.2em;
+  bottom: 0.9em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 0.8em 0.9em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-canvas);
+}
+
+.fv-parallel-agents-cleanup .fv-pc-card.is-tree {
+  left: 0.9em;
+  width: 16.4em;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-card.is-branch {
+  left: 18.2em;
+  right: 0.9em;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-eyebrow {
+  font-size: 0.66em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fv-dim);
+}
+
+.fv-parallel-agents-cleanup .fv-pc-path {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-family: var(--fv-mono);
+  font-size: 0.74em;
+  color: var(--fv-soft);
+}
+
+.fv-parallel-agents-cleanup .fv-pc-path svg,
+.fv-parallel-agents-cleanup .fv-pc-name svg {
+  flex: none;
+  width: 1.3em;
+  height: 1.3em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-proc {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.3em 0.55em;
+  border-radius: 0.5em;
+  background: var(--fv-raise);
+  font-family: var(--fv-mono);
+  font-size: 0.72em;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-proc em {
+  margin-left: auto;
+  font-style: normal;
+  color: var(--fv-dim);
+}
+
+.fv-parallel-agents-cleanup .fv-pc-gone {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--fv-canvas) 86%, transparent);
+  font-size: 0.86em;
+  color: var(--fv-soft);
+  opacity: 0;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-gone span {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-family: var(--fv-mono);
+  font-size: 0.86em;
+  font-weight: 500;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-commit {
+  display: grid;
+  grid-template-columns: 0.7em 1fr auto;
+  align-items: center;
+  gap: 0.6em;
+  font-size: 0.76em;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-commit i {
+  width: 0.65em;
+  height: 0.65em;
+  border: 0.14em solid var(--fv-ok);
+  border-radius: 50%;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-commit span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-commit code {
+  font-family: var(--fv-mono);
+  font-size: 0.9em;
+  color: var(--fv-dim);
+}
+
+.fv-parallel-agents-cleanup .fv-pc-kept {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  margin-top: auto;
+  padding: 0.4em 0.7em;
+  border-radius: 0.55em;
+  background: color-mix(in oklab, var(--fv-ok) 14%, transparent);
+  font-size: 0.8em;
+  color: var(--fv-ok);
+}
+
+.fv-parallel-agents-cleanup
+  :where(
+    .fv-pc-timer i,
+    .fv-pc-clock > span,
+    .fv-pc-proc,
+    .fv-pc-gone,
+    .fv-pc-kept,
+    .fv-pc-path
+  ) {
+  animation: var(--pc-loop) var(--fv-swap) infinite both;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-timer i {
+  animation-name: fv-pc-timer;
+  animation-timing-function: linear;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-clock > .is-5 {
+  animation-name: fv-pc-c5;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-clock > .is-3 {
+  animation-name: fv-pc-c3;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-clock > .is-1 {
+  animation-name: fv-pc-c1;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-clock > .is-0 {
+  animation-name: fv-pc-c0;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-proc {
+  animation-name: fv-pc-proc;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-proc + .fv-pc-proc {
+  animation-delay: 0.25s;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-path {
+  animation-name: fv-pc-path;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-gone {
+  animation-name: fv-pc-gone;
+}
+
+.fv-parallel-agents-cleanup .fv-pc-kept {
+  animation-name: fv-pc-kept;
+}
+
+@keyframes fv-pc-timer {
+  0%,
+  8% {
+    transform: none;
+  }
+
+  48%,
+  94% {
+    transform: scaleX(0);
+  }
+
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-pc-c5 {
+  0%,
+  16% {
+    opacity: 1;
+  }
+
+  18%,
+  97% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-pc-c3 {
+  0%,
+  16% {
+    opacity: 0;
+  }
+
+  18%,
+  31% {
+    opacity: 1;
+  }
+
+  33%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pc-c1 {
+  0%,
+  31% {
+    opacity: 0;
+  }
+
+  33%,
+  46% {
+    opacity: 1;
+  }
+
+  48%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pc-c0 {
+  0%,
+  46% {
+    opacity: 0;
+  }
+
+  48%,
+  95% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pc-proc {
+  0%,
+  50% {
+    opacity: 1;
+    transform: none;
+  }
+
+  56%,
+  94% {
+    opacity: 0.25;
+    transform: translateX(-0.4em);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-pc-path {
+  0%,
+  58% {
+    opacity: 1;
+  }
+
+  63%,
+  94% {
+    opacity: 0.3;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-pc-gone {
+  0%,
+  60% {
+    opacity: 0;
+  }
+
+  66%,
+  94% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pc-kept {
+  0%,
+  66% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  72%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-parallel-agents-cleanup *,
+  .fv-parallel-agents-cleanup *::before,
+  .fv-parallel-agents-cleanup *::after {
+    animation: none !important;
+  }
+
+  .fv-parallel-agents-cleanup .fv-pc-timer i {
+    transform: scaleX(0);
+  }
+}

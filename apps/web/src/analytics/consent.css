@@ -1,0 +1,223 @@
+@import "../components/consent/consent.css";
+
+[data-consent-panel] {
+  --consent-bg: rgb(12 12 13);
+  --consent-fg: rgb(242 241 236);
+  --consent-muted: color-mix(in oklab, rgb(242 241 236) 64%, rgb(12 12 13));
+  --consent-border: color-mix(in oklab, rgb(242 241 236) 18%, transparent);
+  --consent-accent: #ff4f17;
+  --consent-focus: #ff4f17;
+  --consent-error: #ff9a7a;
+  --consent-radius: 18px;
+  --consent-button-radius: 999px;
+  --consent-edge: 16px;
+  --consent-z: 1250;
+  --consent-trigger-z: 60;
+  --consent-shadow:
+    0 28px 64px -28px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.25);
+  font-family:
+    "Geist Variable",
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-feature-settings: normal;
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-consent-panel] [data-consent-trigger] {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-color: color-mix(in oklab, rgb(242 241 236) 22%, transparent);
+  box-shadow: 0 6px 18px -8px rgb(0 0 0 / 0.5);
+  transition:
+    background-color 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+    color 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+[data-consent-panel] .omnyo-consent-page-control {
+  display: none;
+}
+
+[data-consent-panel] [data-consent-trigger] svg {
+  width: 18px;
+  height: 18px;
+}
+
+[data-consent-panel] [data-consent-dialog] {
+  max-width: 384px;
+  margin: 0;
+  padding: 18px 18px 16px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  letter-spacing: -0.003em;
+  animation: omnyo-consent-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+[data-consent-panel] [data-consent-dialog]:focus {
+  outline: none;
+}
+
+[data-consent-panel] [data-consent-dialog]:focus-visible {
+  outline: 2px solid var(--consent-focus);
+  outline-offset: 2px;
+}
+
+[data-consent-panel] :where(p, h2, details, summary, label) {
+  margin: 0;
+  padding: 0;
+}
+
+[data-consent-panel] [data-consent-header] {
+  margin: 0 0 8px;
+}
+
+[data-consent-panel] [data-consent-status] {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--consent-muted);
+}
+
+[data-consent-panel] [data-consent-error] {
+  margin: 8px 0 0;
+}
+
+[data-consent-panel] [data-consent-row] {
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+[data-consent-panel] [data-consent-links] a,
+[data-consent-panel] [data-consent-purposes] > summary {
+  color: var(--consent-fg);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklab, rgb(242 241 236) 38%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+[data-consent-panel] [data-consent-links] a {
+  display: inline-block;
+}
+
+[data-consent-panel] [data-consent-links] a,
+[data-consent-panel] [data-consent-purposes] > summary {
+  padding-block: 10px;
+  margin-block: -10px;
+}
+
+[data-consent-panel] [data-consent-purposes-body] {
+  gap: 12px;
+  margin: 12px 0 0;
+}
+
+[data-consent-panel] [data-consent-purpose] {
+  gap: 10px;
+}
+
+[data-consent-panel] [data-consent-purpose] input {
+  margin: 3px 0 0;
+}
+
+[data-consent-panel] [data-consent-purpose] strong {
+  font-weight: 600;
+}
+
+[data-consent-panel] [data-consent-purpose] strong + span,
+[data-consent-panel] [data-consent-disclosure] {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+[data-consent-panel] [data-consent-actions] {
+  gap: 8px;
+  margin: 14px 0 0;
+}
+
+[data-consent-panel] [data-consent-action] {
+  min-height: 40px;
+  margin: 0;
+  padding: 0 16px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 560;
+  letter-spacing: -0.005em;
+  line-height: 1;
+  transition:
+    background-color 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+[data-consent-panel] [data-consent-save] {
+  margin: 2px 0 0;
+}
+
+[data-consent-panel] [data-consent-close] {
+  margin: -6px -8px 4px 8px;
+  padding: 0;
+}
+
+@media (hover: hover) {
+  [data-consent-panel] [data-consent-trigger]:hover {
+    color: #ff4f17;
+    transform: translateY(-1px);
+  }
+
+  [data-consent-panel] [data-consent-action]:hover {
+    border-color: color-mix(in oklab, rgb(242 241 236) 34%, transparent);
+  }
+
+  [data-consent-panel] [data-consent-links] a:hover,
+  [data-consent-panel] [data-consent-purposes] > summary:hover {
+    text-decoration-color: currentColor;
+  }
+}
+
+@media (min-width: 768px) {
+  [data-consent-panel] [data-consent-trigger],
+  [data-consent-panel] [data-consent-dialog] {
+    left: auto;
+    right: 16px;
+  }
+
+  [data-consent-panel] [data-consent-dialog] {
+    width: 384px;
+  }
+}
+
+@media (max-width: 520px) {
+  [data-consent-panel] {
+    --consent-edge: 12px;
+  }
+
+  [data-consent-panel] [data-consent-dialog] {
+    max-width: none;
+    padding: 16px 16px 14px;
+  }
+}
+
+@keyframes omnyo-consent-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-consent-panel] [data-consent-dialog] {
+    animation: none;
+  }
+
+  [data-consent-panel] [data-consent-trigger] {
+    transition: none;
+  }
+}
+
+.is-reduced [data-consent-panel] [data-consent-dialog] {
+  animation: none;
+}

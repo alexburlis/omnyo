@@ -1066,7 +1066,7 @@ describe("Explore marketplace", () => {
     await readExploreMarketplace({ fetch, origin: "https://web.test" });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0]?.[0]).toBe(
-      "https://web.test/explore/marketplace.json",
+      "https://web.test/explore/marketplace.json?provider-setup=1",
     );
     expect(fetch.mock.calls[0]?.[1]).toMatchObject({
       method: "GET",

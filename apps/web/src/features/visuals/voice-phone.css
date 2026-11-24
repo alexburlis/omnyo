@@ -1,0 +1,448 @@
+.fv-voice-phone {
+  --vp-loop: 9s;
+  --vp-glow: color-mix(in oklab, var(--fv-accent) 3%, transparent);
+  --vp-lift: color-mix(in oklab, var(--fv-ink) 22%, transparent);
+  --vp-attn-text: var(--fv-attn-text);
+
+  background:
+    radial-gradient(45% 60% at 25% 50%, var(--vp-glow), transparent),
+    var(--fv-chrome);
+}
+
+.dark .fv-voice-phone {
+  --vp-glow: rgb(255 200 150 / 0.07);
+  --vp-lift: rgb(0 0 0 / 0.7);
+  --vp-attn-text: var(--fv-attn);
+}
+
+.fv-voice-phone svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-voice-phone .fv-voice-phone-device {
+  position: absolute;
+  top: 1.1em;
+  left: 4em;
+  width: 11.8em;
+  height: 22.8em;
+  padding: 0.45em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 2em;
+  background: oklch(0.12 0.008 268);
+  box-shadow: 0 1.6em 3em -1em var(--vp-lift);
+}
+
+.fv-voice-phone .fv-voice-phone-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 1.6em;
+  background: var(--fv-canvas);
+  font-size: 0.8em;
+}
+
+.fv-voice-phone .fv-voice-phone-screen header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2.4em 0.8em 0.6em;
+  border-bottom: 1px solid var(--fv-seam);
+  line-height: 1.3;
+}
+
+.fv-voice-phone .fv-voice-phone-screen header b {
+  font-weight: 600;
+}
+
+.fv-voice-phone .fv-voice-phone-screen header span {
+  color: var(--fv-dim);
+  font-size: 0.85em;
+}
+
+.fv-voice-phone .fv-voice-phone-chat {
+  flex: 1;
+  padding: 1em 0.9em;
+  color: var(--fv-soft);
+}
+
+.fv-voice-phone .fv-voice-phone-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5em;
+  margin: 0 0.6em 1.4em;
+  padding: 0.5em 0.5em 0.5em 0.8em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 1.2em;
+  background: var(--fv-raise);
+}
+
+.fv-voice-phone .fv-voice-phone-draft {
+  display: grid;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  min-height: 2.9em;
+}
+
+.fv-voice-phone .fv-voice-phone-draft > span {
+  grid-area: 1 / 1;
+}
+
+.fv-voice-phone .fv-voice-phone-placeholder {
+  color: var(--fv-dim);
+  opacity: 0;
+}
+
+.fv-voice-phone .fv-voice-phone-text {
+  position: relative;
+  line-height: 1.4;
+}
+
+.fv-voice-phone .fv-voice-phone-wave {
+  display: flex;
+  align-items: center;
+  gap: 0.18em;
+  height: 2em;
+  opacity: 0;
+}
+
+.fv-voice-phone .fv-voice-phone-wave i {
+  flex: 1;
+  border-radius: 99em;
+  background: var(--fv-ink);
+}
+
+.fv-voice-phone .fv-voice-phone-mic {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.4em;
+  height: 2.4em;
+  border-radius: 50%;
+  background: var(--fv-select);
+}
+
+.fv-voice-phone .fv-voice-phone-mic svg {
+  width: 1.2em;
+  height: 1.2em;
+}
+
+.fv-voice-phone .fv-voice-phone-mic::after {
+  content: "";
+  position: absolute;
+  width: 2.4em;
+  height: 2.4em;
+  border-radius: 50%;
+  background: var(--fv-bad);
+  opacity: 0;
+}
+
+.fv-voice-phone .fv-voice-phone-mic {
+  position: relative;
+}
+
+.fv-voice-phone .fv-voice-phone-mic svg {
+  position: relative;
+  z-index: 1;
+}
+
+.fv-voice-phone .fv-voice-phone-wire {
+  position: absolute;
+  top: 12.5em;
+  left: 16.4em;
+  width: 5.1em;
+  height: 1px;
+  background: var(--fv-hair);
+}
+
+.fv-voice-phone .fv-voice-phone-wire::after {
+  content: "";
+  position: absolute;
+  top: -0.2em;
+  left: 0;
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: var(--fv-accent);
+  opacity: 0;
+}
+
+.fv-voice-phone .fv-voice-phone-mac {
+  position: absolute;
+  top: 50%;
+  right: 3em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  width: 15.5em;
+  padding: 1em 1.1em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-canvas);
+  transform: translateY(-50%);
+}
+
+.fv-voice-phone .fv-voice-phone-mac > p:first-child {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+
+.fv-voice-phone .fv-voice-phone-mac > p:first-child svg {
+  width: 1.6em;
+  height: 1.1em;
+  color: var(--fv-soft);
+}
+
+.fv-voice-phone .fv-voice-phone-mac b {
+  font-weight: 600;
+}
+
+.fv-voice-phone .fv-voice-phone-service {
+  color: var(--fv-soft);
+  font-size: 0.86em;
+}
+
+.fv-voice-phone .fv-voice-phone-state {
+  display: grid;
+  font-size: 0.86em;
+}
+
+.fv-voice-phone .fv-voice-phone-state > span {
+  grid-area: 1 / 1;
+}
+
+.fv-voice-phone .fv-voice-phone-state > :not(.is-done) {
+  opacity: 0;
+}
+
+.fv-voice-phone .fv-voice-phone-state .is-idle {
+  color: var(--fv-dim);
+}
+
+.fv-voice-phone .fv-voice-phone-state .is-busy {
+  color: var(--vp-attn-text);
+}
+
+.fv-voice-phone .fv-voice-phone-state .is-done {
+  color: var(--fv-ok);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-voice-phone .fv-voice-phone-placeholder {
+    animation: fv-voice-phone-placeholder var(--vp-loop) linear infinite;
+  }
+
+  .fv-voice-phone .fv-voice-phone-text {
+    animation: fv-voice-phone-text var(--vp-loop) linear infinite;
+  }
+
+  .fv-voice-phone .fv-voice-phone-wave {
+    animation: fv-voice-phone-wave var(--vp-loop) linear infinite;
+  }
+
+  .fv-voice-phone .fv-voice-phone-wave i {
+    animation: fv-voice-phone-bar 0.9s ease-in-out infinite alternate;
+  }
+
+  .fv-voice-phone .fv-voice-phone-mic {
+    animation: fv-voice-phone-tap var(--vp-loop) linear infinite;
+  }
+
+  .fv-voice-phone .fv-voice-phone-mic::after {
+    animation: fv-voice-phone-recording var(--vp-loop) linear infinite;
+  }
+
+  .fv-voice-phone .fv-voice-phone-wire::after {
+    animation: fv-voice-phone-packet var(--vp-loop) linear infinite;
+  }
+
+  .fv-voice-phone .fv-voice-phone-state .is-idle {
+    animation: fv-voice-phone-idle var(--vp-loop) linear infinite;
+  }
+
+  .fv-voice-phone .fv-voice-phone-state .is-busy {
+    animation: fv-voice-phone-busy var(--vp-loop) linear infinite;
+  }
+
+  .fv-voice-phone .fv-voice-phone-state .is-done {
+    animation: fv-voice-phone-done var(--vp-loop) linear infinite;
+  }
+}
+
+@keyframes fv-voice-phone-placeholder {
+  0%,
+  10% {
+    opacity: 1;
+  }
+
+  12%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-voice-phone-text {
+  0%,
+  62% {
+    opacity: 0;
+  }
+
+  68%,
+  94% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-voice-phone-wave {
+  0%,
+  11% {
+    opacity: 0;
+  }
+
+  13%,
+  43% {
+    opacity: 1;
+  }
+
+  45%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-voice-phone-bar {
+  from {
+    transform: scaleY(0.35);
+  }
+
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes fv-voice-phone-tap {
+  0%,
+  9% {
+    transform: scale(1);
+  }
+
+  11% {
+    transform: scale(0.88);
+  }
+
+  13%,
+  42% {
+    transform: scale(1);
+  }
+
+  44% {
+    transform: scale(0.88);
+  }
+
+  46%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes fv-voice-phone-recording {
+  0%,
+  11% {
+    opacity: 0;
+  }
+
+  13%,
+  43% {
+    opacity: 0.85;
+  }
+
+  45%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-voice-phone-packet {
+  0%,
+  44% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+
+  46% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  53% {
+    opacity: 1;
+    transform: translateX(4.7em);
+  }
+
+  55%,
+  100% {
+    opacity: 0;
+    transform: translateX(4.7em);
+  }
+}
+
+@keyframes fv-voice-phone-idle {
+  0%,
+  52% {
+    opacity: 1;
+  }
+
+  53.5%,
+  98.5% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-voice-phone-busy {
+  0%,
+  53.5% {
+    opacity: 0;
+  }
+
+  55%,
+  61% {
+    opacity: 1;
+  }
+
+  62.5%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-voice-phone-done {
+  0%,
+  62.5% {
+    opacity: 0;
+  }
+
+  64%,
+  96% {
+    opacity: 1;
+  }
+
+  97.5%,
+  100% {
+    opacity: 0;
+  }
+}

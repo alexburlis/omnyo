@@ -1,0 +1,336 @@
+.fv-usage-tracking-order {
+  --uto-loop: 8s;
+  --uto-glow: color-mix(in oklab, var(--fv-accent) 3%, transparent);
+  --uto-lift: color-mix(in oklab, var(--fv-ink) 20%, transparent);
+  --uto-attn-text: var(--fv-attn-text);
+
+  display: flex;
+  flex-direction: column;
+  gap: 1.4em;
+  padding: 1.9em 2.1em;
+  background:
+    radial-gradient(55% 60% at 0% 0%, var(--uto-glow), transparent),
+    var(--fv-canvas);
+}
+
+.dark .fv-usage-tracking-order {
+  --uto-glow: rgb(255 160 110 / 0.06);
+  --uto-lift: rgb(0 0 0 / 0.7);
+  --uto-attn-text: var(--fv-attn);
+}
+
+.fv-usage-tracking-order .fv-uto-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5em;
+}
+
+.fv-usage-tracking-order .fv-uto-head h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+}
+
+.fv-usage-tracking-order .fv-uto-head p {
+  margin-top: 0.15em;
+  font-size: 0.88em;
+}
+
+.fv-usage-tracking-order .fv-uto-switch {
+  position: relative;
+  flex: none;
+  width: 2.5em;
+  height: 1.4em;
+  border-radius: 99em;
+  background: var(--fv-ok);
+}
+
+.fv-usage-tracking-order .fv-uto-switch i {
+  position: absolute;
+  top: 0.15em;
+  right: 0.15em;
+  width: 1.1em;
+  height: 1.1em;
+  border-radius: 50%;
+  background: var(--fv-canvas);
+}
+
+.fv-usage-tracking-order .fv-uto-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background:
+    linear-gradient(var(--fv-seam), var(--fv-seam)) 0 4.1em / 100% 1px no-repeat,
+    linear-gradient(var(--fv-seam), var(--fv-seam)) 0 8.2em / 100% 1px no-repeat,
+    var(--fv-raise);
+  animation: fv-uto-list var(--uto-loop) ease-in-out infinite both;
+}
+
+.fv-usage-tracking-order .fv-uto-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.9em;
+  height: 4.1em;
+  padding: 0 1.1em 0 0.8em;
+  border-radius: 0.6em;
+  white-space: nowrap;
+}
+
+.fv-usage-tracking-order .fv-uto-row.is-up {
+  z-index: 2;
+  background: var(--fv-raise);
+  animation: fv-uto-up var(--uto-loop) cubic-bezier(0.45, 0, 0.2, 1) infinite
+    both;
+}
+
+.fv-usage-tracking-order .fv-uto-row.is-down {
+  z-index: 1;
+  animation: fv-uto-down var(--uto-loop) cubic-bezier(0.45, 0, 0.2, 1) infinite
+    both;
+}
+
+.fv-usage-tracking-order .fv-uto-row.is-up::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.6em;
+  box-shadow: 0 1em 2em -0.6em var(--uto-lift);
+  opacity: 0;
+  pointer-events: none;
+  animation: fv-uto-lift var(--uto-loop) ease-in-out infinite both;
+}
+
+.fv-usage-tracking-order .fv-uto-handle {
+  flex: none;
+  width: 0.7em;
+  height: 1.1em;
+  fill: var(--fv-dim);
+}
+
+.fv-usage-tracking-order .is-up .fv-uto-handle {
+  fill: var(--fv-ink);
+}
+
+.fv-usage-tracking-order .fv-uto-name {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15em;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.fv-usage-tracking-order .fv-uto-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.fv-usage-tracking-order .fv-uto-line b {
+  font-weight: 560;
+}
+
+.fv-usage-tracking-order .fv-uto-badge {
+  padding: 0.05em 0.5em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.35em;
+  font-size: 0.75em;
+  color: var(--fv-soft);
+}
+
+.fv-usage-tracking-order .fv-uto-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.78em;
+}
+
+.fv-usage-tracking-order .fv-uto-status .fv-dot {
+  width: 0.45em;
+  height: 0.45em;
+}
+
+.fv-usage-tracking-order .fv-uto-quotas {
+  display: flex;
+  gap: 1.1em;
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-usage-tracking-order .fv-uto-quotas span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  min-width: 3.6em;
+  justify-content: flex-end;
+}
+
+.fv-usage-tracking-order .fv-uto-quotas small {
+  font-family: var(--fv-mono);
+  font-size: 0.72em;
+  color: var(--fv-dim);
+}
+
+.fv-usage-tracking-order .fv-uto-quotas .is-attn {
+  color: var(--uto-attn-text);
+}
+
+.fv-usage-tracking-order .fv-uto-quotas .is-dim {
+  color: var(--fv-dim);
+}
+
+.fv-usage-tracking-order .fv-uto-note {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  font-size: 0.84em;
+  white-space: nowrap;
+}
+
+.fv-usage-tracking-order .fv-uto-next {
+  display: inline-grid;
+}
+
+.fv-usage-tracking-order .fv-uto-next > span {
+  grid-area: 1 / 1;
+}
+
+.fv-usage-tracking-order .fv-uto-next .is-before {
+  animation: fv-uto-before var(--uto-loop) ease-in-out infinite both;
+}
+
+.fv-usage-tracking-order .fv-uto-next .is-after {
+  opacity: 0;
+  color: var(--fv-ok);
+  animation: fv-uto-after var(--uto-loop) ease-in-out infinite both;
+}
+
+@keyframes fv-uto-up {
+  0%,
+  20% {
+    transform: none;
+  }
+
+  24% {
+    transform: scale(1.015);
+  }
+
+  44% {
+    transform: translateY(-100%) scale(1.015);
+  }
+
+  48%,
+  93% {
+    transform: translateY(-100%);
+  }
+
+  96%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-uto-down {
+  0%,
+  26% {
+    transform: none;
+  }
+
+  44%,
+  93% {
+    transform: translateY(100%);
+  }
+
+  96%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-uto-lift {
+  0%,
+  19% {
+    opacity: 0;
+  }
+
+  24%,
+  44% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-uto-list {
+  0%,
+  90% {
+    opacity: 1;
+  }
+
+  94%,
+  96% {
+    opacity: 0.25;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-uto-before {
+  0%,
+  44% {
+    opacity: 1;
+  }
+
+  48%,
+  94% {
+    opacity: 0;
+  }
+
+  98%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-uto-after {
+  0%,
+  44% {
+    opacity: 0;
+  }
+
+  48%,
+  94% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-usage-tracking-order *,
+  .fv-usage-tracking-order *::before,
+  .fv-usage-tracking-order *::after {
+    animation: none !important;
+  }
+}
+
+@container (max-width: 520px) {
+  .fv-usage-tracking-order {
+    padding: 1.2em 1.4em;
+  }
+
+  .fv-usage-tracking-order .fv-uto-note > .fv-dim {
+    display: none;
+  }
+}

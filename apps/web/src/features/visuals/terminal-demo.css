@@ -1,0 +1,273 @@
+.terminal-demo {
+  --terminal-bg: oklch(0.985 0.003 268);
+  --terminal-fg: oklch(0.3211 0.012 268);
+  --terminal-muted: color-mix(
+    in oklab,
+    var(--terminal-fg) 69%,
+    var(--terminal-bg)
+  );
+  --terminal-line: color-mix(
+    in oklab,
+    var(--terminal-fg) 15%,
+    var(--terminal-bg)
+  );
+  --terminal-raised: color-mix(
+    in oklab,
+    var(--terminal-fg) 7%,
+    var(--terminal-bg)
+  );
+  --terminal-green: oklch(0.5 0.14 155);
+  --terminal-mono: var(--mono, ui-monospace, monospace);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid var(--terminal-line);
+  border-radius: 18px;
+  background: var(--terminal-bg);
+  color: var(--terminal-fg);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+  overflow: hidden;
+}
+
+.dark .terminal-demo {
+  --terminal-bg: oklch(0.184 0.014 266);
+  --terminal-fg: oklch(0.939 0.009 256);
+  --terminal-green: oklch(0.83 0.13 155);
+}
+
+.terminal-demo :where(p, pre) {
+  margin: 0;
+}
+
+.terminal-demo-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--terminal-line);
+  background: var(--terminal-raised);
+  font-weight: 630;
+}
+
+.terminal-demo-bar > span {
+  color: var(--terminal-muted);
+  font: 500 11px / 1.4 var(--terminal-mono);
+}
+
+.terminal-demo-chat {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding-inline: 16px;
+  color: var(--terminal-muted);
+  font-size: 13px;
+}
+
+.terminal-demo-chat .terminal-demo-user {
+  justify-self: end;
+  padding: 7px 11px;
+  border-radius: 10px 10px 4px 10px;
+  background: var(--terminal-raised);
+  color: var(--terminal-fg);
+}
+
+.terminal-demo-composer {
+  display: grid;
+  min-width: 0;
+  margin-inline: 12px;
+  border: 1px solid var(--terminal-line);
+  border-radius: 12px;
+  background: var(--terminal-raised);
+}
+
+.terminal-demo-toolbar,
+.terminal-demo-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+}
+
+.terminal-demo-toolbar {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  padding-left: 10px;
+  color: var(--terminal-muted);
+  font-size: 12px;
+}
+
+.terminal-demo-toolbar > p > span,
+.terminal-demo-form > span,
+.terminal-demo-line > span {
+  color: var(--terminal-green);
+  font-family: var(--terminal-mono);
+}
+
+.terminal-demo-toolbar > p > span {
+  margin-inline-end: 6px;
+}
+
+.terminal-demo-shell {
+  min-height: 88px;
+  margin-inline: 4px;
+  padding: 8px 9px;
+  border-radius: 6px;
+  background: var(--terminal-bg);
+  overflow-wrap: anywhere;
+}
+
+.terminal-demo-shell,
+.terminal-demo-shell pre,
+.terminal-demo-form input,
+.terminal-demo-samples button {
+  font: 400 12px / 1.5 var(--terminal-mono);
+}
+
+.terminal-demo-path {
+  color: var(--terminal-muted);
+  font-size: 11px;
+}
+
+.terminal-demo-line {
+  margin-top: 4px;
+}
+
+.terminal-demo-output {
+  white-space: pre-wrap;
+}
+
+.terminal-demo-output.is-success {
+  color: var(--terminal-green);
+}
+
+.terminal-demo-form {
+  margin: 0 4px 4px;
+  padding-left: 9px;
+  border-radius: 6px;
+  background: var(--terminal-bg);
+}
+
+.terminal-demo-form input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+}
+
+.terminal-demo-form input::placeholder {
+  color: var(--terminal-muted);
+}
+
+.terminal-demo button {
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.terminal-demo .terminal-demo-switch {
+  background: transparent;
+  color: var(--terminal-muted);
+  font: inherit;
+}
+
+.terminal-demo .terminal-demo-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--terminal-green);
+  color: var(--terminal-bg);
+  font: 650 12px / 1.4 var(--sans);
+}
+
+.terminal-demo .terminal-demo-hint {
+  padding: 0 12px 8px;
+  color: var(--terminal-muted);
+  font-size: 12px;
+}
+
+.terminal-demo-samples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 12px 12px;
+}
+
+.terminal-demo-samples button {
+  border-color: var(--terminal-line);
+  background: var(--terminal-raised);
+}
+
+.terminal-demo :is(button, input):focus-visible {
+  outline: 2px solid var(--terminal-green);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .terminal-demo button:hover {
+    border-color: var(--terminal-muted);
+  }
+}
+
+.fv-terminal {
+  display: grid;
+  align-content: center;
+  gap: 0.65em;
+  padding: 7% 8%;
+}
+
+.fv-terminal-title {
+  font-weight: 650;
+}
+
+.fv-terminal-message,
+.fv-terminal-draft {
+  padding: 0.55em 0.7em;
+  border-radius: 0.6em;
+  background: var(--fv-raise);
+  color: var(--fv-soft);
+}
+
+.fv-terminal-shell {
+  display: grid;
+  align-content: start;
+  gap: 0.55em;
+  min-width: 0;
+  padding: 0.7em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.6em;
+  background: var(--fv-chrome);
+  font-family: var(--fv-mono);
+}
+
+.fv-terminal-shell pre {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.fv-terminal-shell p span,
+.fv-terminal-panel pre {
+  color: var(--fv-ok);
+}
+
+.fv-terminal-panel {
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1fr);
+}
+
+.fv-terminal-thread {
+  display: grid;
+  gap: 0.65em;
+}

@@ -1,0 +1,256 @@
+.fv-performance-reopen {
+  --pro-loop: 6s;
+
+  display: flex;
+  flex-direction: column;
+  gap: 1.2em;
+  padding: 1.6em 2em;
+  background:
+    radial-gradient(60% 60% at 100% 0%, rgb(140 220 170 / 0.07), transparent),
+    var(--fv-canvas);
+}
+
+.fv-performance-reopen .fv-pro-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1em;
+}
+
+.fv-performance-reopen .fv-pro-head h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+}
+
+.fv-performance-reopen .fv-pro-head p {
+  margin-top: 0.1em;
+  font-size: 0.88em;
+}
+
+.fv-performance-reopen .fv-pro-tag {
+  padding: 0.2em 0.6em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.4em;
+  font-size: 0.75em;
+  color: var(--fv-soft);
+  white-space: nowrap;
+}
+
+.fv-performance-reopen .fv-pro-race {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+  padding: 1.1em 1.2em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-raise);
+}
+
+.fv-performance-reopen .fv-pro-lane p {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.4em;
+  font-size: 0.92em;
+}
+
+.fv-performance-reopen .fv-pro-done {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  animation: var(--pro-loop) ease-out infinite both;
+}
+
+.fv-performance-reopen .is-before .fv-pro-done {
+  color: var(--fv-soft);
+  animation-name: fv-pro-label-before;
+}
+
+.fv-performance-reopen .is-now .fv-pro-done {
+  color: var(--fv-ok);
+  font-size: 1.1em;
+  animation-name: fv-pro-label-now;
+}
+
+.fv-performance-reopen .fv-pro-track {
+  position: relative;
+  display: block;
+  height: 0.75em;
+  border-radius: 99em;
+  background: color-mix(in oklch, var(--fv-ink) 13%, var(--fv-canvas));
+  overflow: hidden;
+}
+
+.fv-performance-reopen .fv-pro-track i {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transform-origin: left center;
+}
+
+.fv-performance-reopen .is-before .fv-pro-track i {
+  background: color-mix(in oklch, var(--fv-attn) 70%, var(--fv-canvas));
+  animation: fv-pro-before var(--pro-loop) linear infinite both;
+}
+
+.fv-performance-reopen .is-now .fv-pro-track i {
+  background: var(--fv-ok);
+  transform: scaleX(0.014);
+  animation: fv-pro-now var(--pro-loop) linear infinite both;
+}
+
+.fv-performance-reopen .is-now .fv-pro-track::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0.25em;
+  width: 1.1em;
+  height: 1.1em;
+  margin-top: -0.55em;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--fv-ok) 45%, transparent);
+  opacity: 0;
+  animation: fv-pro-pop var(--pro-loop) ease-out infinite both;
+}
+
+.fv-performance-reopen .fv-pro-note {
+  font-size: 0.78em;
+}
+
+.fv-performance-reopen .fv-pro-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8em;
+}
+
+.fv-performance-reopen .fv-pro-cards li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1em;
+  padding: 0.8em 1em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.8em;
+  font-size: 0.88em;
+}
+
+.fv-performance-reopen .fv-pro-cards b {
+  font-size: 1.55em;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-performance-reopen .fv-pro-cards li > span:last-child {
+  font-size: 0.85em;
+}
+
+@keyframes fv-pro-before {
+  0%,
+  8% {
+    transform: scaleX(0);
+  }
+
+  38%,
+  92% {
+    transform: none;
+  }
+
+  96%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes fv-pro-now {
+  0%,
+  8% {
+    transform: scaleX(0);
+  }
+
+  8.42%,
+  92% {
+    transform: scaleX(0.014);
+  }
+
+  96%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes fv-pro-pop {
+  0%,
+  8% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+
+  9% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  18%,
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
+@keyframes fv-pro-label-now {
+  0%,
+  8.4% {
+    opacity: 0;
+  }
+
+  9.5%,
+  92% {
+    opacity: 1;
+  }
+
+  96%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pro-label-before {
+  0%,
+  38% {
+    opacity: 0;
+  }
+
+  40%,
+  92% {
+    opacity: 1;
+  }
+
+  96%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-performance-reopen *,
+  .fv-performance-reopen *::before,
+  .fv-performance-reopen *::after {
+    animation: none !important;
+  }
+
+  .fv-performance-reopen .fv-pro-done {
+    opacity: 1;
+  }
+}
+
+@container (max-width: 520px) {
+  .fv-performance-reopen {
+    padding: 1.2em 1.4em;
+    gap: 0.9em;
+  }
+
+  .fv-performance-reopen .fv-pro-tag,
+  .fv-performance-reopen .fv-pro-note {
+    display: none;
+  }
+}

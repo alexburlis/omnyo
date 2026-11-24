@@ -1,0 +1,128 @@
+.fv-dev-servers {
+  display: flex;
+  flex-direction: column;
+  padding: 0 2em 1.2em;
+  background:
+    radial-gradient(60% 45% at 50% 100%, rgb(255 200 150 / 0.06), transparent),
+    var(--fv-canvas);
+}
+
+.fv-dev-servers-log {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.9em;
+  min-height: 0;
+  padding-bottom: 0.9em;
+  overflow: hidden;
+  mask-image: linear-gradient(transparent, #000 3em);
+}
+
+.fv-dev-servers-you {
+  align-self: flex-end;
+  padding: 0.5em 1em;
+  border-radius: 1em;
+  background: var(--fv-select);
+  white-space: nowrap;
+}
+
+.fv-dev-servers-agent {
+  color: var(--fv-soft);
+}
+
+.fv-dev-servers-shelf {
+  padding: 0.8em 1em 0.4em;
+  border-radius: 1em 1em 0 0;
+  border-bottom: 0;
+  background: var(--fv-raise);
+}
+
+.fv-dev-servers-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.4em;
+  font-size: 0.9em;
+}
+
+.fv-dev-servers-head .fv-eyebrow {
+  color: var(--fv-soft);
+}
+
+.fv-dev-servers-rows li {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  padding: 0.5em 0;
+  border-top: 1px solid var(--fv-seam);
+  white-space: nowrap;
+}
+
+.fv-dev-servers-rows li:first-child {
+  border-top: 0;
+}
+
+.fv-dev-servers-rows .fv-dot {
+  width: 0.6em;
+  height: 0.6em;
+}
+
+.fv-dev-servers-rows li.is-ok .fv-dot {
+  box-shadow: 0 0 0 0.25em color-mix(in oklab, var(--fv-ok) 22%, transparent);
+  animation: fv-dev-servers-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes fv-dev-servers-pulse {
+  50% {
+    box-shadow: 0 0 0 0.4em color-mix(in oklab, var(--fv-ok) 8%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-dev-servers-rows li.is-ok .fv-dot {
+    animation: none;
+  }
+}
+
+.fv-dev-servers-address {
+  font-weight: 560;
+}
+
+.fv-dev-servers-status {
+  overflow: hidden;
+  color: var(--fv-dim);
+  font-size: 0.9em;
+  text-overflow: ellipsis;
+}
+
+.fv-dev-servers-action {
+  margin-left: auto;
+  padding: 0.25em 0.8em;
+  border-radius: 0.5em;
+  background: var(--fv-select);
+  font-size: 0.9em;
+  font-weight: 560;
+}
+
+.is-ok .fv-dev-servers-action {
+  background: var(--fv-ink);
+  color: var(--fv-canvas);
+}
+
+.fv-dev-servers-composer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.8em 1em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0 0 1em 1em;
+  background: var(--fv-canvas);
+}
+
+.fv-dev-servers-send {
+  width: 1.8em;
+  height: 1.8em;
+  border-radius: 50%;
+  background: var(--fv-select);
+}

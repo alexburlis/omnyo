@@ -1,0 +1,347 @@
+.fv-open-source-providers {
+  --osp-loop: 8s;
+  --osp-row: 4.3em;
+
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 1.4em;
+  padding: 1.6em 1.8em;
+  background:
+    radial-gradient(50% 60% at 100% 100%, rgb(255 79 23 / 0.07), transparent),
+    var(--fv-canvas);
+}
+
+.fv-open-source-providers .fv-eyebrow {
+  margin-bottom: 0.7em;
+}
+
+.fv-open-source-providers .fv-osp-plugins {
+  position: relative;
+}
+
+.fv-open-source-providers .fv-osp-plugins ul {
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-raise);
+}
+
+.fv-open-source-providers .fv-osp-row {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  height: var(--osp-row);
+  padding: 0 1em;
+}
+
+.fv-open-source-providers .fv-osp-row + .fv-osp-row {
+  border-top: 1px solid var(--fv-seam);
+}
+
+.fv-open-source-providers .fv-osp-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.fv-open-source-providers .fv-osp-copy b {
+  overflow: hidden;
+  font-size: 0.92em;
+  font-weight: 560;
+  text-overflow: ellipsis;
+}
+
+.fv-open-source-providers .fv-osp-copy .fv-dim {
+  overflow: hidden;
+  font-size: 0.8em;
+  text-overflow: ellipsis;
+}
+
+.fv-open-source-providers .fv-osp-switch {
+  position: relative;
+  flex: none;
+  width: 2.4em;
+  height: 1.35em;
+  border-radius: 99em;
+  background: var(--fv-hair);
+}
+
+.fv-open-source-providers .fv-osp-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--fv-ok);
+  opacity: 0;
+}
+
+.fv-open-source-providers .fv-osp-thumb {
+  position: absolute;
+  top: 0.15em;
+  left: 0.15em;
+  width: 1.05em;
+  height: 1.05em;
+  border-radius: 50%;
+  background: var(--fv-ink);
+}
+
+.fv-open-source-providers .is-on .fv-osp-fill {
+  opacity: 1;
+}
+
+.fv-open-source-providers .is-on .fv-osp-thumb {
+  transform: translateX(1.05em);
+}
+
+.fv-open-source-providers .is-flip .fv-osp-fill {
+  animation: fv-osp-fill var(--osp-loop) ease-in-out infinite both;
+}
+
+.fv-open-source-providers .is-flip .fv-osp-thumb {
+  animation: fv-osp-thumb var(--osp-loop) cubic-bezier(0.3, 0.7, 0.2, 1)
+    infinite both;
+}
+
+.fv-open-source-providers .fv-osp-cursor {
+  position: absolute;
+  top: calc(1.75em + var(--osp-row) * 3.5);
+  right: 0.9em;
+  width: 1.25em;
+  height: 1.55em;
+  fill: var(--fv-ink);
+  stroke: var(--fv-canvas);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0.15em 0.3em rgb(0 0 0 / 0.5));
+  opacity: 0;
+  animation: fv-osp-cursor var(--osp-loop) cubic-bezier(0.45, 0, 0.2, 1)
+    infinite both;
+}
+
+.fv-open-source-providers .fv-osp-new {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fv-open-source-providers .fv-osp-menu {
+  display: flex;
+  flex-direction: column;
+  padding: 0.4em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.8em;
+  background: var(--fv-chrome);
+  box-shadow: 0 1em 2.4em -1em var(--fv-shade);
+}
+
+.dark .fv-open-source-providers .fv-osp-menu {
+  box-shadow: 0 1em 2.4em -1em rgb(0 0 0 / 0.6);
+}
+
+.fv-open-source-providers .fv-osp-agent {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  height: 2.3em;
+  padding: 0 0.7em;
+  border-radius: 0.5em;
+  font-size: 0.92em;
+  white-space: nowrap;
+}
+
+.fv-open-source-providers .fv-osp-agent > i {
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 0.25em;
+  background: var(--fv-hair);
+}
+
+.fv-open-source-providers .fv-osp-agent.is-picked {
+  background: var(--fv-select);
+}
+
+.fv-open-source-providers .fv-osp-agent.is-picked > i {
+  background: var(--fv-accent);
+}
+
+.fv-open-source-providers .fv-osp-agent svg {
+  width: 1em;
+  height: 1em;
+  margin-left: auto;
+  fill: none;
+  stroke: var(--fv-ink);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-open-source-providers .fv-osp-agent.is-added {
+  opacity: 0;
+  animation: fv-osp-added var(--osp-loop) cubic-bezier(0.2, 0.8, 0.2, 1)
+    infinite both;
+}
+
+.fv-open-source-providers .fv-osp-agent.is-added + .is-added {
+  animation-name: fv-osp-added-2;
+}
+
+.fv-open-source-providers .fv-osp-composer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8em;
+  margin-top: auto;
+  padding: 0.8em 0.9em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.9em;
+  font-size: 0.88em;
+  white-space: nowrap;
+}
+
+.fv-open-source-providers .fv-osp-composer .fv-dim {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fv-open-source-providers .fv-osp-pill {
+  flex: none;
+  padding: 0.15em 0.65em;
+  border-radius: 99em;
+  background: var(--fv-select);
+}
+
+@keyframes fv-osp-fill {
+  0%,
+  30% {
+    opacity: 0;
+  }
+
+  33%,
+  90% {
+    opacity: 1;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-osp-thumb {
+  0%,
+  30% {
+    transform: none;
+  }
+
+  34%,
+  90% {
+    transform: translateX(1.05em);
+  }
+
+  95%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-osp-added {
+  0%,
+  38% {
+    opacity: 0;
+    transform: translateY(-0.5em);
+  }
+
+  44%,
+  90% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-osp-added-2 {
+  0%,
+  42% {
+    opacity: 0;
+    transform: translateY(-0.5em);
+  }
+
+  48%,
+  90% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-osp-cursor {
+  0%,
+  10% {
+    opacity: 0;
+    transform: translate(-5em, -4em);
+  }
+
+  17% {
+    opacity: 1;
+    transform: translate(-2.5em, -1.5em);
+  }
+
+  26%,
+  28.5% {
+    opacity: 1;
+    transform: none;
+  }
+
+  30% {
+    opacity: 1;
+    transform: scale(0.85);
+  }
+
+  32%,
+  46% {
+    opacity: 1;
+    transform: none;
+  }
+
+  58%,
+  100% {
+    opacity: 0;
+    transform: translate(-4em, 2em);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-open-source-providers *,
+  .fv-open-source-providers *::before,
+  .fv-open-source-providers *::after {
+    animation: none !important;
+  }
+
+  .fv-open-source-providers .fv-osp-agent.is-added {
+    opacity: 1;
+  }
+}
+
+@container (max-width: 520px) {
+  .fv-open-source-providers {
+    padding: 1.2em 1.3em;
+    gap: 0.9em;
+  }
+
+  .fv-open-source-providers .fv-osp-copy .fv-dim {
+    display: none;
+  }
+
+  .fv-open-source-providers .fv-osp-composer .fv-dim {
+    display: none;
+  }
+}

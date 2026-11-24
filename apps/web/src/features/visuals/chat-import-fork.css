@@ -1,0 +1,400 @@
+.fv.fv-chat-import-fork {
+  --cf-loop: 8s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-chat-import-fork .fv-cf-chat {
+  position: absolute;
+  top: 0.9em;
+  left: 0.9em;
+  bottom: 0.9em;
+  width: 19.7em;
+  overflow: hidden;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-canvas);
+}
+
+.fv-chat-import-fork .fv-cf-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 2.4em;
+  padding: 0 0.9em;
+  border-bottom: 1px solid var(--fv-seam);
+  white-space: nowrap;
+}
+
+.fv-chat-import-fork .fv-cf-bar b {
+  font-size: 0.88em;
+  font-weight: 600;
+}
+
+.fv-chat-import-fork .fv-cf-bar small {
+  font-size: 0.72em;
+  color: var(--fv-dim);
+}
+
+.fv-chat-import-fork .fv-cf-bar .fv-pill {
+  margin-left: auto;
+  font-size: 0.7em;
+  color: var(--fv-soft);
+}
+
+.fv-chat-import-fork .fv-cf-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  padding: 0.7em 1em;
+  font-size: 0.82em;
+}
+
+.fv-chat-import-fork .fv-cf-hidden {
+  align-self: center;
+  padding: 0.2em 0.8em;
+  border: 1px dashed var(--fv-hair);
+  border-radius: 99em;
+  font-size: 0.86em;
+  color: var(--fv-dim);
+}
+
+.fv-chat-import-fork .fv-cf-say {
+  color: var(--fv-soft);
+}
+
+.fv-chat-import-fork .fv-cf-you {
+  align-self: flex-end;
+  padding: 0.3em 0.85em;
+  border-radius: 1em;
+  background: var(--fv-select);
+}
+
+.fv-chat-import-fork .fv-cf-fork {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: 0.86em;
+  color: var(--fv-info);
+}
+
+.fv-chat-import-fork .fv-cf-fork svg {
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.fv-chat-import-fork .fv-cf-composer {
+  position: absolute;
+  left: 0.8em;
+  right: 0.8em;
+  bottom: 0.8em;
+  display: flex;
+  align-items: center;
+  height: 2.4em;
+  padding: 0 0.5em 0 0.9em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-raise);
+  font-size: 0.86em;
+}
+
+.fv-chat-import-fork .fv-cf-draft {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.fv-chat-import-fork .fv-cf-draft > span {
+  grid-area: 1 / 1;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.fv-chat-import-fork .fv-cf-draft .is-hint {
+  color: var(--fv-dim);
+}
+
+.fv-chat-import-fork .fv-cf-draft .is-text {
+  clip-path: inset(0 100% 0 0);
+}
+
+.fv-chat-import-fork .fv-cf-send {
+  display: grid;
+  place-items: center;
+  width: 1.7em;
+  height: 1.7em;
+  border-radius: 50%;
+  background: var(--fv-ink);
+}
+
+.fv-chat-import-fork .fv-cf-send svg {
+  width: 0.95em;
+  height: 0.95em;
+  fill: none;
+  stroke: var(--fv-canvas);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-chat-import-fork .fv-cf-orig {
+  position: absolute;
+  top: 0.9em;
+  left: 21.5em;
+  right: 0.9em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  padding: 0.8em 0.9em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-canvas);
+}
+
+.fv-chat-import-fork .fv-cf-orig h4 {
+  font-size: 0.66em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fv-dim);
+}
+
+.fv-chat-import-fork .fv-cf-path {
+  overflow: hidden;
+  font-family: var(--fv-mono);
+  font-size: 0.68em;
+  line-height: 1.5;
+  color: var(--fv-soft);
+}
+
+.fv-chat-import-fork .fv-cf-path span {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-chat-import-fork .fv-cf-orig dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.3em 0.8em;
+  font-size: 0.74em;
+}
+
+.fv-chat-import-fork .fv-cf-orig dt {
+  color: var(--fv-dim);
+}
+
+.fv-chat-import-fork .fv-cf-orig dd {
+  text-align: right;
+}
+
+.fv-chat-import-fork .fv-cf-lock {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.4em 0.6em;
+  border-radius: 0.55em;
+  background: color-mix(in oklab, var(--fv-ok) 13%, transparent);
+  font-size: 0.74em;
+  color: oklch(0.5 0.13 155);
+}
+
+.dark .fv-chat-import-fork .fv-cf-lock {
+  color: var(--fv-ok);
+}
+
+.fv-chat-import-fork .fv-cf-lock svg {
+  width: 1.15em;
+  height: 1.15em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-chat-import-fork .fv-cf-agent {
+  padding: 0.5em 0.6em;
+  border-radius: 0.55em;
+  background: var(--fv-raise);
+  font-size: 0.72em;
+  line-height: 1.4;
+  color: var(--fv-soft);
+}
+
+.fv-chat-import-fork
+  :where(
+    .fv-cf-draft > span,
+    .fv-cf-send,
+    .fv-cf-you,
+    .fv-cf-fork,
+    .fv-cf-reply,
+    .fv-cf-lock
+  ) {
+  animation: var(--cf-loop) var(--fv-swap) infinite both;
+}
+
+.fv-chat-import-fork .fv-cf-draft .is-hint {
+  animation-name: fv-cf-hint;
+}
+
+.fv-chat-import-fork .fv-cf-draft .is-text {
+  animation-name: fv-cf-type;
+  animation-timing-function: steps(18, end);
+}
+
+.fv-chat-import-fork .fv-cf-send {
+  animation-name: fv-cf-send;
+}
+
+.fv-chat-import-fork .fv-cf-you {
+  animation-name: fv-cf-you;
+}
+
+.fv-chat-import-fork .fv-cf-fork {
+  animation-name: fv-cf-fork;
+}
+
+.fv-chat-import-fork .fv-cf-reply {
+  animation-name: fv-cf-reply;
+}
+
+.fv-chat-import-fork .fv-cf-lock {
+  animation-name: fv-cf-lock;
+}
+
+@keyframes fv-cf-hint {
+  0%,
+  8% {
+    opacity: 1;
+  }
+
+  9%,
+  96% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-cf-type {
+  0%,
+  8% {
+    clip-path: inset(0 100% 0 0);
+  }
+
+  26%,
+  32% {
+    clip-path: inset(0 0 0 0);
+  }
+
+  33%,
+  100% {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
+@keyframes fv-cf-send {
+  0%,
+  30% {
+    transform: none;
+  }
+
+  32% {
+    transform: scale(0.85);
+  }
+
+  35%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-cf-you {
+  0%,
+  32% {
+    opacity: 0;
+    transform: translateY(0.6em);
+  }
+
+  37%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-cf-fork {
+  0%,
+  38% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  43%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-cf-reply {
+  0%,
+  50% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  56%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-cf-lock {
+  0%,
+  40% {
+    transform: none;
+  }
+
+  44% {
+    transform: scale(1.05);
+  }
+
+  48%,
+  100% {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-chat-import-fork *,
+  .fv-chat-import-fork *::before,
+  .fv-chat-import-fork *::after {
+    animation: none !important;
+  }
+}

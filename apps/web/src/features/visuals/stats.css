@@ -1,0 +1,667 @@
+.fv.fv-stats {
+  --s-accent: color-mix(in oklch, var(--fv-ok) 45%, var(--fv-ink));
+  --s-signal: oklch(0.58 0.1 250);
+  --s-border: color-mix(in oklch, var(--fv-ink) 19.4%, var(--fv-canvas));
+  --s-muted: var(--fv-soft);
+  --s-grid: color-mix(in oklab, var(--fv-ink) 4%, transparent);
+
+  font-size: 1.86cqw;
+  background: var(--fv-canvas);
+}
+
+.dark .fv.fv-stats {
+  --s-signal: oklch(0.72 0.09 250);
+}
+
+.fv-stats .fv-stats-page {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15em;
+  padding: 1.6em 1.8em;
+}
+
+.fv-stats .fv-stats-mast {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+}
+
+.fv-stats .fv-stats-brand {
+  display: grid;
+  place-items: center;
+  width: 3.4em;
+  height: 3.4em;
+  border: 1px solid var(--s-border);
+  border-radius: 0.92em;
+  background: color-mix(in oklab, var(--s-accent) 7%, var(--fv-canvas));
+}
+
+.fv-stats .fv-stats-brand svg {
+  width: 1.85em;
+  height: 1.85em;
+  fill: none;
+  stroke: var(--s-accent);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-stats .fv-stats-brand circle {
+  fill: var(--s-accent);
+  stroke: none;
+}
+
+.fv-stats .fv-stats-eyebrow {
+  font-family: var(--fv-mono);
+  font-size: 0.77em;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--s-muted);
+  white-space: nowrap;
+}
+
+.fv-stats .fv-stats-title {
+  margin: 0.15em 0 0;
+  font-size: 2em;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.04em;
+}
+
+.fv-stats .fv-stats-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+  margin-left: auto;
+  font-size: 0.85em;
+  color: var(--s-muted);
+  white-space: nowrap;
+}
+
+.fv-stats .fv-stats-status i {
+  position: relative;
+  width: 0.46em;
+  height: 0.46em;
+  border-radius: 50%;
+  background: var(--s-accent);
+  box-shadow: 0 0 0 0.31em color-mix(in oklab, var(--s-accent) 10%, transparent);
+}
+
+.fv-stats .fv-stats-status i::after,
+.fv-stats .fv-stats-now::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+}
+
+.fv-stats .fv-stats-status i::after {
+  color: var(--s-accent);
+}
+
+.fv-stats .fv-stats-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-left: 0.6em;
+  padding: 0.45em 0.95em;
+  border: 1px solid var(--s-border);
+  border-radius: 0.6em;
+  font-size: 0.92em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.fv-stats .fv-stats-refresh svg {
+  width: 1.05em;
+  height: 1.05em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-stats .fv-stats-summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--s-border);
+  border-radius: 1.23em;
+  background: linear-gradient(
+    130deg,
+    color-mix(in oklab, var(--s-accent) 5%, var(--fv-canvas)),
+    var(--fv-canvas) 45%,
+    color-mix(in oklab, var(--s-signal) 5%, var(--fv-canvas))
+  );
+}
+
+.fv-stats .fv-stats-summary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--s-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--s-grid) 1px, transparent 1px);
+  background-size: 2.46em 2.46em;
+  mask-image: linear-gradient(to right, transparent, black 60%, transparent);
+}
+
+.fv-stats .fv-stats-summary li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 1.3em 1.25em 1.15em;
+}
+
+.fv-stats .fv-stats-summary li + li {
+  border-left: 1px solid var(--s-border);
+}
+
+.fv-stats .fv-stats-head {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.82em;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--s-muted);
+  white-space: nowrap;
+}
+
+.fv-stats .fv-stats-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fv-stats .fv-stats-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+  font-size: 0.82em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--s-accent);
+}
+
+.fv-stats .fv-stats-kicker::before {
+  content: "";
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.fv-stats .fv-stats-value {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4em;
+  margin-top: 0.5em;
+  font-size: 2.85em;
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.055em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-stats .fv-stats-value small {
+  font-size: 0.3em;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--s-muted);
+}
+
+.fv-stats .is-live .fv-stats-value {
+  color: var(--s-accent);
+}
+
+.fv-stats .is-speed .fv-stats-value {
+  color: var(--s-signal);
+}
+
+.fv-stats .fv-stats-caption {
+  display: -webkit-box;
+  min-height: 2.9em;
+  margin-top: 0.75em;
+  overflow: hidden;
+  font-size: 0.85em;
+  line-height: 1.45;
+  color: var(--s-muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-stats .fv-stats-foot {
+  display: flex;
+  align-items: flex-end;
+  gap: 1em;
+  min-height: 2.6em;
+  margin-top: 0.4em;
+  overflow: hidden;
+  font-size: 0.77em;
+  color: var(--s-muted);
+  white-space: nowrap;
+}
+
+.fv-stats .fv-stats-foot > span {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85em;
+  line-height: 1.25;
+}
+
+.fv-stats .fv-stats-foot b {
+  color: var(--fv-ink);
+  font-size: 1.2em;
+  font-weight: 600;
+}
+
+.fv-stats .fv-stats-nav {
+  display: flex;
+  gap: 0.25em;
+  border-bottom: 1px solid var(--s-border);
+  font-size: 0.92em;
+  color: var(--s-muted);
+}
+
+.fv-stats .fv-stats-nav li {
+  position: relative;
+  padding: 0.85em 1.08em;
+  white-space: nowrap;
+}
+
+.fv-stats .fv-stats-nav li.is-on {
+  color: var(--fv-ink);
+}
+
+.fv-stats .fv-stats-nav li.is-on::after {
+  content: "";
+  position: absolute;
+  left: 1em;
+  right: 1em;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--s-accent);
+}
+
+.fv-stats .fv-stats-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.23em;
+  margin-top: 1.4em;
+}
+
+.fv-stats .fv-stats-chart {
+  --s-chart: var(--s-signal);
+
+  min-width: 0;
+  padding: 1.7em 1.7em 1.2em;
+  border: 1px solid var(--s-border);
+  border-radius: 1em;
+}
+
+.fv-stats .fv-stats-chart.is-agents {
+  --s-chart: var(--s-accent);
+}
+
+.fv-stats .fv-stats-chart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1em;
+}
+
+.fv-stats .fv-stats-chart h4 {
+  margin-top: 0.3em;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.fv-stats .fv-stats-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25em;
+  margin-top: 0.5em;
+  font-size: 1.85em;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+  color: var(--s-chart);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-stats .fv-stats-stat small {
+  font-size: 0.42em;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--s-muted);
+}
+
+.fv-stats .fv-stats-meta {
+  font-family: var(--fv-mono);
+  font-size: 0.7em;
+  color: var(--s-muted);
+  white-space: nowrap;
+}
+
+.fv-stats .fv-stats-plot {
+  position: relative;
+  height: 12em;
+  margin-top: 0.6em;
+}
+
+.fv-stats .fv-stats-plot svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.fv-stats .fv-stats-area {
+  mask-image: linear-gradient(black, transparent 95%);
+}
+
+.fv-stats .fv-stats-area path {
+  fill: var(--s-chart);
+  opacity: 0.22;
+}
+
+.fv-stats .fv-stats-rule {
+  stroke: var(--s-border);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+  vector-effect: non-scaling-stroke;
+}
+
+.fv-stats .fv-stats-line,
+.fv-stats .fv-stats-peak {
+  fill: none;
+  stroke: var(--s-chart);
+  vector-effect: non-scaling-stroke;
+}
+
+.fv-stats .fv-stats-line {
+  stroke-width: 2;
+}
+
+.fv-stats .fv-stats-peak {
+  opacity: 0.35;
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.fv-stats .fv-stats-ink {
+  position: absolute;
+  inset: 0;
+}
+
+.fv-stats .fv-stats-now {
+  position: absolute;
+  left: 95.45%;
+  width: 0.62em;
+  height: 0.62em;
+  margin: -0.31em 0 0 -0.31em;
+  border-radius: 50%;
+  background: var(--s-chart);
+  box-shadow: 0 0 0 0.22em color-mix(in oklab, var(--s-chart) 22%, transparent);
+  color: var(--s-chart);
+}
+
+.fv-stats .is-live {
+  counter-reset: fv-stats-run var(--fv-stats-run) fv-stats-sub
+    var(--fv-stats-sub);
+}
+
+.fv-stats .is-speed {
+  counter-reset: fv-stats-tps var(--fv-stats-tps);
+}
+
+.fv-stats .fv-stats-run::before {
+  content: counter(fv-stats-run);
+}
+
+.fv-stats .fv-stats-sub::before {
+  content: counter(fv-stats-sub);
+}
+
+.fv-stats .fv-stats-tps::before {
+  content: counter(fv-stats-tps);
+}
+
+.fv-stats .is-live {
+  animation: fv-stats-agents 8s steps(1, end) infinite both;
+}
+
+.fv-stats .is-speed {
+  animation: fv-stats-speed 8s cubic-bezier(0.5, 0, 0.2, 1) infinite both;
+}
+
+.fv-stats .fv-stats-status i::after,
+.fv-stats .fv-stats-now::after {
+  animation: fv-stats-pulse 2s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+
+.fv-box[data-live] .fv-stats .fv-stats-ink {
+  animation: fv-stats-draw 1.5s cubic-bezier(0.45, 0, 0.2, 1) both;
+}
+
+.fv-box[data-live] .fv-stats .fv-stats-now {
+  animation: fv-stats-dot 0.3s ease-out 1.35s both;
+}
+
+.fv-box[data-live] .fv-stats .is-tps :is(.fv-stats-ink, .fv-stats-now) {
+  animation-delay: 0.2s;
+}
+
+.fv-box[data-live] .fv-stats .is-tps .fv-stats-now {
+  animation-delay: 1.55s;
+}
+
+@property --fv-stats-run {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 5;
+}
+
+@property --fv-stats-sub {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 2;
+}
+
+@property --fv-stats-tps {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 142;
+}
+
+@keyframes fv-stats-agents {
+  0% {
+    --fv-stats-run: 5;
+    --fv-stats-sub: 2;
+  }
+
+  30% {
+    --fv-stats-run: 6;
+    --fv-stats-sub: 3;
+  }
+
+  76% {
+    --fv-stats-run: 5;
+    --fv-stats-sub: 2;
+  }
+}
+
+@keyframes fv-stats-speed {
+  0% {
+    --fv-stats-tps: 142;
+  }
+
+  16% {
+    --fv-stats-tps: 142;
+  }
+
+  24% {
+    --fv-stats-tps: 168;
+  }
+
+  38% {
+    --fv-stats-tps: 168;
+  }
+
+  46% {
+    --fv-stats-tps: 187;
+  }
+
+  60% {
+    --fv-stats-tps: 187;
+  }
+
+  68% {
+    --fv-stats-tps: 159;
+  }
+
+  84% {
+    --fv-stats-tps: 159;
+  }
+
+  92%,
+  100% {
+    --fv-stats-tps: 142;
+  }
+}
+
+@keyframes fv-stats-pulse {
+  0% {
+    opacity: 0.55;
+    transform: none;
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+@keyframes fv-stats-draw {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes fv-stats-dot {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-stats *,
+  .fv-stats *::before,
+  .fv-stats *::after {
+    animation: none !important;
+  }
+}
+
+@container (max-width: 700px) {
+  .fv-stats .fv-stats-foot,
+  .fv-stats .fv-stats-caption,
+  .fv-stats .fv-stats-nav,
+  .fv-stats .fv-stats-meta,
+  .fv-stats .fv-stats-chart .fv-stats-eyebrow {
+    display: none;
+  }
+
+  .fv-stats .fv-stats-page {
+    gap: 1em;
+  }
+
+  .fv-stats .fv-stats-summary li {
+    padding: 1.1em 1.2em 1em;
+  }
+
+  .fv-stats .fv-stats-charts {
+    gap: 1em;
+    margin-top: 0;
+  }
+
+  .fv-stats .fv-stats-chart {
+    padding: 1.1em 1.3em 0.9em;
+  }
+
+  .fv-stats .fv-stats-chart h4 {
+    margin-top: 0;
+  }
+
+  .fv-stats .fv-stats-stat {
+    margin-top: 0.25em;
+    font-size: 1.6em;
+  }
+
+  .fv-stats .fv-stats-plot {
+    height: 6.4em;
+    margin-top: 0.5em;
+  }
+}
+
+@container (max-width: 440px) {
+  .fv.fv-stats {
+    font-size: 2.6cqw;
+  }
+
+  .fv-stats .fv-stats-page {
+    padding: 1.3em 1.4em;
+  }
+
+  .fv-stats .fv-stats-refresh {
+    display: none;
+  }
+
+  .fv-stats .fv-stats-summary {
+    grid-template-columns: 1fr 1.25fr;
+  }
+
+  .fv-stats .fv-stats-summary li:nth-child(n + 3) {
+    display: none;
+  }
+
+  .fv-stats .fv-stats-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .fv-stats .fv-stats-chart.is-tps,
+  .fv-stats .fv-stats-mast,
+  .fv-stats .fv-stats-stat {
+    display: none;
+  }
+
+  .fv-stats .fv-stats-plot {
+    height: 5.6em;
+  }
+}

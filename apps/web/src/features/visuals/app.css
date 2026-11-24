@@ -1,0 +1,50 @@
+.fv-app {
+  --fv-zoom: 0.36;
+
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--fv-chrome);
+}
+
+.fv-app-art {
+  position: absolute;
+  inset: 0;
+  container-type: inline-size;
+  zoom: var(--fv-zoom);
+}
+
+.fv-app-art .am {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+@container (min-width: 340px) {
+  .fv-app {
+    --fv-zoom: 0.44;
+  }
+}
+
+@container (min-width: 460px) {
+  .fv-app {
+    --fv-zoom: 0.56;
+  }
+}
+
+@container (min-width: 620px) {
+  .fv-app {
+    --fv-zoom: 0.72;
+  }
+}
+
+@container (min-width: 820px) {
+  .fv-app {
+    --fv-zoom: 0.9;
+  }
+}
+
+@container (min-width: 1040px) {
+  .fv-app {
+    --fv-zoom: 1;
+  }
+}

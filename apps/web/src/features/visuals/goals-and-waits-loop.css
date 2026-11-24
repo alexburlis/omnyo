@@ -1,0 +1,404 @@
+.fv.fv-goals-and-waits-loop {
+  --gl-loop: 10s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-goals-and-waits-loop .fv-gl-card {
+  position: absolute;
+  top: 0.9em;
+  left: 0.9em;
+  bottom: 0.9em;
+  width: 15.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  padding: 0.8em 0.9em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-canvas);
+}
+
+.fv-goals-and-waits-loop .fv-gl-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: 0.84em;
+}
+
+.fv-goals-and-waits-loop .fv-gl-head svg {
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: var(--fv-info);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-goals-and-waits-loop .fv-gl-head b {
+  font-weight: 600;
+}
+
+.fv-goals-and-waits-loop .fv-gl-next {
+  display: grid;
+  margin-left: auto;
+  font-size: 0.86em;
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-loop .fv-gl-next > span {
+  grid-area: 1 / 1;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.fv-goals-and-waits-loop .fv-gl-next > :not(.is-end) {
+  opacity: 0;
+}
+
+.fv-goals-and-waits-loop .fv-gl-prompt {
+  padding: 0.5em 0.65em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.6em;
+  background: var(--fv-raise);
+  font-size: 0.84em;
+  line-height: 1.4;
+}
+
+.fv-goals-and-waits-loop .fv-gl-own {
+  margin-top: auto;
+  font-size: 0.72em;
+  line-height: 1.4;
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-loop .fv-gl-cmd {
+  font-family: var(--fv-mono);
+  font-size: 0.66em;
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-loop .fv-gl-actions {
+  display: flex;
+  gap: 0.5em;
+  font-size: 0.76em;
+}
+
+.fv-goals-and-waits-loop .fv-gl-actions span {
+  padding: 0.2em 0.8em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.5em;
+}
+
+.fv-goals-and-waits-loop .fv-gl-actions .is-stop {
+  color: var(--fv-bad);
+}
+
+.fv-goals-and-waits-loop .fv-gl-runs {
+  position: absolute;
+  top: 0.9em;
+  left: 17.2em;
+  right: 0.9em;
+  bottom: 0.9em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 0.8em 0.9em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-canvas);
+}
+
+.fv-goals-and-waits-loop .fv-gl-eyebrow {
+  font-size: 0.64em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-loop .fv-gl-run {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+  font-size: 0.8em;
+}
+
+.fv-goals-and-waits-loop .fv-gl-run p {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6em;
+}
+
+.fv-goals-and-waits-loop .fv-gl-run p span {
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-loop .fv-gl-run.is-hit p {
+  color: var(--fv-ok);
+}
+
+.fv-goals-and-waits-loop .fv-gl-bar {
+  height: 0.38em;
+  border-radius: 99em;
+  background: var(--fv-hair);
+  transform-origin: left;
+}
+
+.fv-goals-and-waits-loop .is-r1 .fv-gl-bar {
+  transform: scaleX(0.14);
+}
+
+.fv-goals-and-waits-loop .is-r2 .fv-gl-bar {
+  transform: scaleX(0.28);
+}
+
+.fv-goals-and-waits-loop .is-r3 .fv-gl-bar {
+  transform: scaleX(0.56);
+}
+
+.fv-goals-and-waits-loop .fv-gl-run.is-hit .fv-gl-bar {
+  display: none;
+}
+
+.fv-goals-and-waits-loop :where(.fv-gl-run, .fv-gl-next > span, .fv-gl-bar) {
+  animation: var(--gl-loop) var(--fv-swap) infinite both;
+}
+
+.fv-goals-and-waits-loop .fv-gl-run.is-r1 {
+  animation-name: fv-gl-in-1;
+}
+
+.fv-goals-and-waits-loop .fv-gl-run.is-r2 {
+  animation-name: fv-gl-in-2;
+}
+
+.fv-goals-and-waits-loop .fv-gl-run.is-r3 {
+  animation-name: fv-gl-in-3;
+}
+
+.fv-goals-and-waits-loop .fv-gl-run.is-hit {
+  animation-name: fv-gl-in-4;
+}
+
+.fv-goals-and-waits-loop .is-r1 .fv-gl-bar {
+  animation-name: fv-gl-bar-1;
+}
+
+.fv-goals-and-waits-loop .is-r2 .fv-gl-bar {
+  animation-name: fv-gl-bar-2;
+}
+
+.fv-goals-and-waits-loop .is-r3 .fv-gl-bar {
+  animation-name: fv-gl-bar-3;
+}
+
+.fv-goals-and-waits-loop .fv-gl-next .is-1m {
+  animation-name: fv-gl-n1;
+}
+
+.fv-goals-and-waits-loop .fv-gl-next .is-2m {
+  animation-name: fv-gl-n2;
+}
+
+.fv-goals-and-waits-loop .fv-gl-next .is-4m {
+  animation-name: fv-gl-n3;
+}
+
+.fv-goals-and-waits-loop .fv-gl-next .is-end {
+  animation-name: fv-gl-n4;
+}
+
+@keyframes fv-gl-in-1 {
+  0%,
+  6% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  10%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gl-in-2 {
+  0%,
+  24% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  28%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gl-in-3 {
+  0%,
+  42% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  46%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gl-in-4 {
+  0%,
+  62% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  66%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gl-bar-1 {
+  0%,
+  8% {
+    transform: scaleX(0);
+  }
+
+  22%,
+  100% {
+    transform: scaleX(0.14);
+  }
+}
+
+@keyframes fv-gl-bar-2 {
+  0%,
+  26% {
+    transform: scaleX(0);
+  }
+
+  40%,
+  100% {
+    transform: scaleX(0.28);
+  }
+}
+
+@keyframes fv-gl-bar-3 {
+  0%,
+  44% {
+    transform: scaleX(0);
+  }
+
+  60%,
+  100% {
+    transform: scaleX(0.56);
+  }
+}
+
+@keyframes fv-gl-n1 {
+  0%,
+  8% {
+    opacity: 0;
+  }
+
+  10%,
+  26% {
+    opacity: 1;
+  }
+
+  28%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-gl-n2 {
+  0%,
+  26% {
+    opacity: 0;
+  }
+
+  28%,
+  44% {
+    opacity: 1;
+  }
+
+  46%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-gl-n3 {
+  0%,
+  44% {
+    opacity: 0;
+  }
+
+  46%,
+  64% {
+    opacity: 1;
+  }
+
+  66%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-gl-n4 {
+  0%,
+  64% {
+    opacity: 0;
+  }
+
+  66%,
+  95% {
+    opacity: 1;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-goals-and-waits-loop *,
+  .fv-goals-and-waits-loop *::before,
+  .fv-goals-and-waits-loop *::after {
+    animation: none !important;
+  }
+}

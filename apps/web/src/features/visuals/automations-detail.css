@@ -1,0 +1,280 @@
+.fv-automations-detail {
+  --ad-loop: 8s;
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  padding: 1.5em 2em 0;
+  background:
+    radial-gradient(60% 50% at 85% 0, rgb(255 200 150 / 0.05), transparent),
+    var(--fv-canvas);
+}
+
+.fv-automations-detail svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-automations-detail .fv-automations-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+
+.fv-automations-detail .fv-automations-detail-glyph {
+  width: 1.2em;
+  height: 1.2em;
+  color: var(--fv-soft);
+}
+
+.fv-automations-detail .fv-automations-detail-head h3 {
+  font-size: 1.2em;
+  font-weight: 600;
+}
+
+.fv-automations-detail .fv-automations-detail-toggle {
+  position: relative;
+  width: 2.3em;
+  height: 1.3em;
+  margin-left: auto;
+  border-radius: 99em;
+  background: var(--fv-ok);
+}
+
+.fv-automations-detail .fv-automations-detail-toggle::after {
+  content: "";
+  position: absolute;
+  top: 0.15em;
+  right: 0.15em;
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+  background: var(--fv-canvas);
+}
+
+.fv-automations-detail .fv-automations-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25em 1em;
+  margin-bottom: 0.5em;
+  color: var(--fv-soft);
+  font-size: 0.86em;
+  white-space: nowrap;
+}
+
+.fv-automations-detail .fv-automations-detail-meta > span + span::before {
+  content: "·";
+  margin-right: 1em;
+  color: var(--fv-dim);
+}
+
+.fv-automations-detail .fv-automations-detail-swap {
+  display: inline-grid;
+}
+
+.fv-automations-detail .fv-automations-detail-swap > span {
+  grid-area: 1 / 1;
+}
+
+.fv-automations-detail .fv-automations-detail-swap > .is-before {
+  opacity: 0;
+}
+
+.fv-automations-detail .fv-automations-detail-prompt {
+  margin-bottom: 0.6em;
+  padding: 0.75em 1em;
+  color: var(--fv-ink);
+}
+
+.fv-automations-detail .fv-automations-detail-runs {
+  display: flex;
+  flex-direction: column;
+}
+
+.fv-automations-detail .fv-automations-detail-runs li {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  height: 2.3em;
+  padding: 0 0.7em;
+  border-radius: 0.5em;
+  color: var(--fv-dim);
+  font-size: 0.95em;
+  white-space: nowrap;
+}
+
+.fv-automations-detail .fv-automations-detail-runs b {
+  color: var(--fv-ink);
+  font-weight: 500;
+}
+
+.fv-automations-detail .fv-automations-detail-runs li.is-new {
+  background: color-mix(in oklab, var(--fv-ink) 4%, transparent);
+}
+
+.fv-automations-detail .fv-automations-detail-icon {
+  position: relative;
+  display: grid;
+  width: 1.1em;
+  height: 1.1em;
+}
+
+.fv-automations-detail .fv-automations-detail-icon svg {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+}
+
+.fv-automations-detail .fv-automations-detail-icon .is-ok {
+  color: var(--fv-ok);
+}
+
+.fv-automations-detail .fv-automations-detail-icon .is-spin {
+  color: var(--fv-dim);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-automations-detail .fv-automations-detail-runs {
+    animation: fv-automations-detail-list var(--ad-loop) linear infinite;
+  }
+
+  .fv-automations-detail .fv-automations-detail-runs li:not(.is-new) {
+    animation: fv-automations-detail-push var(--ad-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-automations-detail .fv-automations-detail-runs li.is-new {
+    animation: fv-automations-detail-arrive var(--ad-loop) var(--fv-swap)
+      infinite;
+  }
+
+  .fv-automations-detail .fv-automations-detail-icon .is-spin {
+    animation:
+      fv-automations-detail-before var(--ad-loop) linear infinite,
+      fv-automations-detail-spin 0.9s linear infinite;
+  }
+
+  .fv-automations-detail .fv-automations-detail-icon .is-ok,
+  .fv-automations-detail .fv-automations-detail-swap > .is-after {
+    animation: fv-automations-detail-after var(--ad-loop) linear infinite;
+  }
+
+  .fv-automations-detail .fv-automations-detail-runs li:not(.is-new) .is-ok {
+    animation: none;
+  }
+
+  .fv-automations-detail .fv-automations-detail-swap > .is-before {
+    animation: fv-automations-detail-before var(--ad-loop) linear infinite;
+  }
+
+  .fv-automations-detail .fv-automations-detail-next .is-before {
+    animation: fv-automations-detail-next-before var(--ad-loop) linear infinite;
+  }
+
+  .fv-automations-detail .fv-automations-detail-next .is-after {
+    animation: fv-automations-detail-next-after var(--ad-loop) linear infinite;
+  }
+}
+
+@keyframes fv-automations-detail-list {
+  0% {
+    opacity: 0;
+  }
+
+  4%,
+  94% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-automations-detail-push {
+  0%,
+  12% {
+    transform: translateY(-2.3em);
+  }
+
+  20%,
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes fv-automations-detail-arrive {
+  0%,
+  14% {
+    opacity: 0;
+    transform: translateY(-0.6em);
+  }
+
+  22%,
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fv-automations-detail-before {
+  0%,
+  62% {
+    opacity: 1;
+  }
+
+  66%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-automations-detail-after {
+  0%,
+  62% {
+    opacity: 0;
+  }
+
+  66%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-automations-detail-next-before {
+  0%,
+  16% {
+    opacity: 1;
+  }
+
+  20%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-automations-detail-next-after {
+  0%,
+  16% {
+    opacity: 0;
+  }
+
+  20%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-automations-detail-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.fv-automations-detail > * {
+  flex: none;
+}

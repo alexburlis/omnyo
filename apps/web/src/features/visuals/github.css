@@ -1,0 +1,814 @@
+.fv.fv-github {
+  --fv-github-primary: oklch(0.27 0.014 268);
+  --fv-github-on-primary: var(--fv-canvas);
+  --fv-github-muted: color-mix(in oklch, var(--fv-ink) 16%, var(--fv-canvas));
+  --fv-github-subtle: oklch(0.5 0.01 268);
+  --fv-github-purple: oklch(0.53 0.2 295);
+  --fv-loop: 8s;
+  --fv-play: paused;
+
+  display: flex;
+  flex-direction: column;
+  font-size: max(7px, 1.8cqw);
+}
+
+.fv-github svg {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-github-top {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.55em;
+  height: 3.2em;
+  padding: 0 1.1em;
+  border-bottom: 1px solid var(--fv-seam);
+  white-space: nowrap;
+}
+
+.fv-github-top b {
+  font-size: 0.95em;
+}
+
+.fv-github-sync {
+  display: none;
+  margin-left: auto;
+  color: var(--fv-soft);
+  font-size: 0.84em;
+}
+
+.fv-github-refresh {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 2.1em;
+  margin-left: auto;
+  padding: 0 0.7em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.45em;
+  font-size: 0.86em;
+}
+
+.fv-github-refresh svg {
+  width: 1.05em;
+  height: 1.05em;
+}
+
+.fv-github-close {
+  margin-left: 0.4em;
+  color: var(--fv-soft);
+}
+
+.fv-github-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  min-height: 0;
+  padding: 1.1em 1.2em;
+}
+
+.fv-github-row,
+.fv-github-chips,
+.fv-github-states {
+  display: flex;
+  flex: none;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.fv-github-tabs {
+  display: inline-flex;
+  padding: 0.22em;
+  border-radius: 0.6em;
+  background: var(--fv-github-muted);
+}
+
+.fv-github-tabs span {
+  padding: 0.32em 0.8em;
+  border-radius: 0.42em;
+  color: var(--fv-soft);
+  font-size: 0.9em;
+}
+
+.fv-github-tabs .is-on {
+  background: var(--fv-canvas);
+  color: var(--fv-ink);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+.fv-github-new {
+  display: flex;
+  align-items: center;
+  height: 2.2em;
+  margin-left: auto;
+  padding: 0 0.85em;
+  border-radius: 0.45em;
+  background: var(--fv-github-primary);
+  color: var(--fv-github-on-primary);
+  font-size: 0.88em;
+  font-weight: 500;
+}
+
+.fv-github-chips {
+  gap: 0.3em;
+}
+
+.fv-github-chips > span,
+.fv-github-states > span {
+  display: flex;
+  align-items: center;
+  height: 2.2em;
+  padding: 0 0.85em;
+  font-size: 0.88em;
+}
+
+.fv-github-chips > span {
+  border-radius: 99em;
+}
+
+.fv-github-states {
+  gap: 0.2em;
+}
+
+.fv-github-states > span {
+  padding: 0 0.75em;
+  border-radius: 0.45em;
+  color: var(--fv-soft);
+}
+
+.fv-github-chips .is-on,
+.fv-github-states .is-on {
+  background: var(--fv-select);
+  color: var(--fv-ink);
+}
+
+.fv-github-states em {
+  margin-left: 0.3em;
+  color: var(--fv-soft);
+  font-size: 0.8em;
+  font-style: normal;
+}
+
+.fv-github .fv-github-filter {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 2.6em;
+  padding: 0 0.8em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.45em;
+  color: var(--fv-dim);
+  font-size: 0.88em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.fv-github-list {
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.7em;
+}
+
+.fv-github-head {
+  display: none;
+}
+
+.fv-github-item {
+  position: relative;
+  display: grid;
+  gap: 0.55em;
+  padding: 0.85em 0.85em 0.8em;
+}
+
+.fv-github-item.is-closes::before,
+.fv-github-item.is-starts::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklab, var(--fv-select) 70%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fv-github-item > *,
+.fv-github-meta > * {
+  position: relative;
+}
+
+.fv-github-roll {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  height: 1.3em;
+  overflow: hidden;
+  line-height: 1.3;
+  vertical-align: bottom;
+}
+
+.fv-github-roll > span {
+  white-space: nowrap;
+  transform: translateY(-100%);
+}
+
+.fv-github-swap {
+  display: inline-grid;
+}
+
+.fv-github-swap > * {
+  grid-area: 1 / 1;
+}
+
+.is-closes .fv-github-swap > :first-child,
+.is-starts .fv-github-swap > :last-child {
+  opacity: 0;
+}
+
+.is-starts .fv-github-start {
+  position: relative;
+}
+
+.fv-github .fv-github-cursor {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  width: 1.7em;
+  height: 1.7em;
+  margin: -0.18em 0 0 -0.35em;
+  fill: oklch(0.99 0 0);
+  stroke: oklch(0.2 0.01 260);
+  stroke-width: 1.3;
+  filter: drop-shadow(0 0.15em 0.25em rgb(0 0 0 / 0.5));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fv-github-item + .fv-github-item {
+  border-top: 1px solid var(--fv-hair);
+}
+
+.fv-github-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35em 0.5em;
+  min-width: 0;
+}
+
+.fv-github-name {
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.fv-github-agent {
+  padding: 0.1em 0.55em;
+  border-radius: 0.4em;
+  background: var(--fv-select);
+  font-size: 0.78em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fv-github-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  min-width: 0;
+}
+
+.fv-github-id {
+  color: var(--fv-soft);
+  font-family: var(--fv-mono);
+  font-size: 0.82em;
+}
+
+.fv-github-assignee {
+  display: flex;
+  align-items: center;
+  color: color-mix(in oklab, var(--fv-soft) 50%, transparent);
+  font-size: 0.86em;
+}
+
+.fv-github-assignee.is-none {
+  display: none;
+}
+
+.fv-github-avatar {
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--fv-canvas);
+}
+
+.fv-github-avatar.is-a {
+  background: linear-gradient(135deg, oklch(0.72 0.12 60), oklch(0.55 0.13 30));
+}
+
+.fv-github-avatar.is-b {
+  background: linear-gradient(135deg, oklch(0.7 0.1 210), oklch(0.5 0.12 260));
+}
+
+.fv-github-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  height: 2.15em;
+  padding: 0 0.55em;
+  border-radius: 0.45em;
+  font-size: 0.86em;
+}
+
+.fv-github-state i {
+  position: relative;
+  width: 0.62em;
+  height: 0.62em;
+  border-radius: 50%;
+  background: oklch(0.72 0.19 150);
+}
+
+.is-closes .fv-github-state i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--fv-github-purple);
+}
+
+.fv-github-state svg {
+  width: 0.95em;
+  height: 0.95em;
+  color: var(--fv-soft);
+}
+
+.fv-github-updated {
+  display: none;
+  color: var(--fv-soft);
+  font-size: 0.86em;
+  text-align: right;
+}
+
+.fv-github-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25em;
+  margin-left: auto;
+}
+
+.fv-github-start {
+  display: flex;
+  align-items: center;
+  height: 2.15em;
+  padding: 0 0.8em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.45em;
+  font-size: 0.86em;
+}
+
+.fv-github-more {
+  display: grid;
+  place-items: center;
+  width: 1.9em;
+  color: var(--fv-soft);
+}
+
+@container (max-width: 400px) {
+  .fv.fv-github {
+    font-size: max(7px, 2.5cqw);
+  }
+
+  .fv-github .fv-github-filter,
+  .fv-github-states em {
+    display: none;
+  }
+}
+
+@container (max-width: 200px) {
+  .fv-github-row,
+  .fv-github-chips,
+  .fv-github-states {
+    display: none;
+  }
+
+  .fv-github-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .fv-github-item.is-starts {
+    order: -1;
+    border-top: 0;
+  }
+
+  .fv-github-item.is-closes {
+    border-top: 1px solid var(--fv-hair);
+  }
+
+  .fv-github-top {
+    height: 2.8em;
+  }
+}
+
+@container (min-width: 600px) {
+  .fv-github-sync {
+    display: inline;
+  }
+
+  .fv-github-sync + .fv-github-refresh {
+    margin-left: 0.6em;
+  }
+
+  .fv-github-item {
+    display: flex;
+    align-items: center;
+    gap: 0.85em;
+    padding: 0.5em 0.85em;
+  }
+
+  .fv-github-head {
+    display: flex;
+    align-items: center;
+    gap: 1.09em;
+    height: 3.1em;
+    padding: 0 1.09em;
+    border-bottom: 1px solid var(--fv-hair);
+    background: color-mix(in oklab, var(--fv-github-muted) 50%, transparent);
+    color: var(--fv-soft);
+    font-size: 0.78em;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .fv-github-head > span {
+    flex: none;
+    color: inherit;
+    font-family: inherit;
+    font-size: 1em;
+  }
+
+  .fv-github-head + .fv-github-item {
+    border-top: 0;
+  }
+
+  .fv-github-meta {
+    display: contents;
+  }
+
+  .fv-github-title,
+  .fv-github-head > .fv-github-title {
+    flex: 1;
+    flex-wrap: nowrap;
+    order: 2;
+  }
+
+  .fv-github-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fv-github-id {
+    order: 1;
+    width: 4.15em;
+  }
+
+  .fv-github-assignee,
+  .fv-github-assignee.is-none {
+    display: flex;
+    flex: none;
+    order: 3;
+    width: 6.63em;
+  }
+
+  .fv-github-status {
+    flex: none;
+    order: 4;
+    width: 6.9em;
+  }
+
+  .fv-github-updated {
+    display: block;
+    flex: none;
+    order: 5;
+    width: 4.65em;
+  }
+
+  .fv-github-actions {
+    flex: none;
+    order: 6;
+    width: 6.9em;
+    margin-left: 0;
+  }
+
+  .fv-github-head > .fv-github-id {
+    width: 4.36em;
+  }
+
+  .fv-github-head > .fv-github-assignee {
+    width: 7.31em;
+  }
+
+  .fv-github-head > .fv-github-status,
+  .fv-github-head > .fv-github-actions {
+    width: 8.85em;
+  }
+
+  .fv-github-head > .fv-github-updated {
+    width: 5.13em;
+  }
+}
+
+.fv-box[data-live] .fv-github {
+  --fv-play: running;
+}
+
+.fv-github-refresh svg {
+  animation: fv-github-refresh var(--fv-loop) cubic-bezier(0.45, 0, 0.2, 1)
+    infinite var(--fv-play);
+}
+
+.fv-github-roll > span {
+  animation: fv-github-roll var(--fv-loop) cubic-bezier(0.3, 0, 0.2, 1) infinite
+    var(--fv-play);
+}
+
+.is-closes .fv-github-swap > :first-child {
+  animation: fv-github-old var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.is-closes .fv-github-swap > :last-child,
+.is-closes .fv-github-state i::after {
+  animation: fv-github-new var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-github-item.is-closes::before {
+  animation: fv-github-flash var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-github-item.is-starts::before {
+  animation: fv-github-hover var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-github .fv-github-cursor {
+  animation: fv-github-cursor var(--fv-loop) cubic-bezier(0.45, 0, 0.2, 1)
+    infinite var(--fv-play);
+}
+
+.is-starts .fv-github-start {
+  animation: fv-github-press var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.is-starts .fv-github-swap > :first-child {
+  animation: fv-github-label var(--fv-loop) linear infinite var(--fv-play);
+}
+
+.is-starts .fv-github-swap > :last-child {
+  animation: fv-github-busy var(--fv-loop) linear infinite var(--fv-play);
+}
+
+.is-starts .fv-github-agent {
+  animation: fv-github-badge var(--fv-loop) cubic-bezier(0.3, 1.4, 0.5, 1)
+    infinite var(--fv-play);
+}
+
+@keyframes fv-github-refresh {
+  0%,
+  7.5% {
+    rotate: 0deg;
+  }
+
+  17.5%,
+  100% {
+    rotate: 360deg;
+  }
+}
+
+@keyframes fv-github-roll {
+  0%,
+  16.25% {
+    opacity: 1;
+    transform: none;
+  }
+
+  20%,
+  92.5% {
+    opacity: 1;
+    transform: translateY(-100%);
+  }
+
+  94.9% {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+
+  95% {
+    opacity: 0;
+    transform: none;
+  }
+
+  98.75%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-github-old {
+  0%,
+  16.25% {
+    opacity: 1;
+  }
+
+  18.75%,
+  93.75% {
+    opacity: 0;
+  }
+
+  97.5%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-github-new {
+  0%,
+  16.25% {
+    opacity: 0;
+  }
+
+  18.75%,
+  92.5% {
+    opacity: 1;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-github-flash {
+  0%,
+  16.25% {
+    opacity: 0;
+  }
+
+  18.75% {
+    opacity: 1;
+  }
+
+  27.5%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-github-hover {
+  0%,
+  35% {
+    opacity: 0;
+  }
+
+  37.5%,
+  52.5% {
+    opacity: 1;
+  }
+
+  57.5%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-github-cursor {
+  0%,
+  27.5% {
+    opacity: 0;
+    transform: translate(5em, 3.5em) scale(1);
+  }
+
+  31.25% {
+    opacity: 1;
+  }
+
+  40%,
+  42.5% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  43.75% {
+    transform: translate(0, 0) scale(0.84);
+  }
+
+  46.25% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  53.75% {
+    opacity: 1;
+    transform: translate(0.8em, 1.8em) scale(1);
+  }
+
+  58.75%,
+  100% {
+    opacity: 0;
+    transform: translate(1.2em, 2.6em) scale(1);
+  }
+}
+
+@keyframes fv-github-press {
+  0%,
+  42.5% {
+    transform: none;
+  }
+
+  43.75% {
+    transform: scale(0.92);
+  }
+
+  46.25%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-github-label {
+  0%,
+  43.75% {
+    opacity: 1;
+  }
+
+  44%,
+  52.5% {
+    opacity: 0;
+  }
+
+  53.75%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-github-busy {
+  0%,
+  43.75% {
+    opacity: 0;
+  }
+
+  44%,
+  52.5% {
+    opacity: 1;
+  }
+
+  53.75%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-github-badge {
+  0%,
+  52.5% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+
+  56.25%,
+  92.5% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-github *,
+  .fv-github *::before,
+  .fv-github *::after {
+    animation: none !important;
+  }
+}
+
+.dark .fv.fv-github {
+  --fv-github-primary: oklch(0.82 0.008 267);
+  --fv-github-on-primary: oklch(0.2178 0.011 268);
+  --fv-github-subtle: oklch(0.68 0.008 267);
+  --fv-github-purple: oklch(0.63 0.2 300);
+}

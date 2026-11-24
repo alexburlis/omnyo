@@ -1,0 +1,722 @@
+.fv-voice {
+  --fv-voice-primary: var(--fv-ink);
+  --fv-voice-on-primary: var(--fv-canvas);
+  --fv-voice-lift: calc(3.4em + 2px);
+  --fv-loop: 8s;
+  --fv-play: paused;
+}
+
+.dark .fv-voice {
+  --fv-voice-primary: oklch(0.82 0.008 267);
+  --fv-voice-on-primary: oklch(0.2178 0.011 268);
+}
+
+.fv-voice svg {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-voice-thread {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.85em;
+  padding: 1.2em 1.5em 1.1em;
+}
+
+.fv-voice-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85em;
+}
+
+.fv-voice .fv-voice-user {
+  align-self: flex-end;
+  max-width: 78%;
+  padding: 0.55em 0.85em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 1em;
+  background: var(--fv-raise);
+  white-space: nowrap;
+}
+
+.fv-voice-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  color: var(--fv-dim);
+  font-size: 0.94em;
+  white-space: nowrap;
+}
+
+.fv-voice .fv-voice-tools-head,
+.fv-voice .fv-voice-tool {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+}
+
+.fv-voice .fv-voice-tools-head {
+  gap: 0.3em;
+}
+
+.fv-voice-tools svg {
+  width: 1.05em;
+  height: 1.05em;
+  stroke-width: 1.8;
+}
+
+.fv-voice-tool span {
+  color: var(--fv-ok);
+}
+
+.fv-voice .fv-voice-say {
+  max-width: 34em;
+  line-height: 1.45;
+}
+
+.fv-voice-composer {
+  position: relative;
+  margin-top: 0.2em;
+  padding: 0.85em 0.75em 0.55em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 1.1em;
+  background: var(--fv-raise);
+}
+
+.fv-voice .fv-voice-draft {
+  display: grid;
+  padding: 0 0.3em 0.75em;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.fv-voice-draft > span {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fv-voice-draft > .fv-voice-placeholder {
+  text-overflow: ellipsis;
+}
+
+.fv-voice-placeholder {
+  color: var(--fv-dim);
+  opacity: 0;
+}
+
+.fv-voice-words > span {
+  display: inline-block;
+  white-space: pre;
+}
+
+.fv-voice-rows {
+  display: grid;
+}
+
+.fv-voice-rows > * {
+  grid-area: 1 / 1;
+}
+
+.fv-voice-rec,
+.fv-voice-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  min-width: 0;
+}
+
+.fv-voice-bar {
+  color: var(--fv-soft);
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.fv-voice-bar > svg {
+  width: 1.15em;
+  height: 1.15em;
+  margin: 0 0.35em;
+  stroke-width: 1.8;
+}
+
+.fv-voice-model {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.9em;
+}
+
+.fv-voice-model svg {
+  width: 1.05em;
+  height: 1.05em;
+  stroke-width: 1.8;
+}
+
+.fv-voice-model .fv-voice-mark {
+  stroke-width: 2.4;
+}
+
+.fv-voice-cancel,
+.fv-voice-add,
+.fv-voice-send,
+.fv-voice-mic {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.3em;
+  height: 2.3em;
+}
+
+.fv-voice-cancel {
+  border-radius: 50%;
+  color: var(--fv-soft);
+}
+
+.fv-voice-cancel svg,
+.fv-voice-mic svg {
+  width: 1.15em;
+  height: 1.15em;
+  stroke-width: 1.8;
+}
+
+.fv-voice-mic {
+  margin-left: auto;
+  border-radius: 50%;
+}
+
+.fv-voice-mic::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--fv-select);
+  opacity: 0;
+}
+
+.fv-voice-mic svg {
+  position: relative;
+}
+
+.fv-voice-wave {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 2em;
+  overflow: hidden;
+  color: var(--fv-ink);
+  -webkit-mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.15), #000 15%);
+  mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.15), #000 15%);
+}
+
+.fv-voice-track,
+.fv-voice-frozen {
+  display: block;
+  height: 2em;
+  stroke-width: 3;
+}
+
+.fv-voice-frozen {
+  transform: translateX(-24.7%);
+}
+
+.fv-voice-shine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000, transparent);
+  opacity: 0;
+}
+
+.fv-voice-shine-in {
+  display: block;
+  width: 250%;
+}
+
+.fv-voice-add {
+  border-radius: 0.45em;
+  background: var(--fv-select);
+}
+
+.fv-voice-add > * {
+  grid-area: 1 / 1;
+}
+
+.fv-voice-add > i {
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 0.15em;
+  background: var(--fv-ink);
+}
+
+.fv-voice .fv-voice-spin {
+  width: 1.1em;
+  height: 1.1em;
+  stroke-width: 2.2;
+  opacity: 0;
+}
+
+.fv-voice-tip {
+  position: absolute;
+  bottom: calc(100% + 0.55em);
+  left: 50%;
+  padding: 0.35em 0.75em;
+  border-radius: 0.45em;
+  background: var(--fv-voice-primary);
+  color: var(--fv-voice-on-primary);
+  font-size: 0.84em;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.fv-voice-send {
+  border-radius: 0.45em;
+  background: var(--fv-voice-primary);
+  color: var(--fv-voice-on-primary);
+}
+
+.fv-voice-send svg {
+  width: 1.15em;
+  height: 1.15em;
+  stroke-width: 2;
+}
+
+.fv-box[data-live] .fv-voice {
+  --fv-play: running;
+}
+
+.fv-voice-log {
+  animation: fv-voice-log var(--fv-loop) cubic-bezier(0.3, 0, 0.2, 1) infinite
+    var(--fv-play);
+}
+
+.fv-voice .fv-voice-sent {
+  animation: fv-voice-sent var(--fv-loop) ease-out infinite var(--fv-play);
+}
+
+.fv-voice-track {
+  animation: fv-voice-scroll var(--fv-loop) linear infinite var(--fv-play);
+  will-change: transform;
+}
+
+.fv-voice-shine {
+  animation: fv-voice-sweep var(--fv-loop) linear infinite var(--fv-play);
+}
+
+.fv-voice-shine-in {
+  animation: fv-voice-counter var(--fv-loop) linear infinite var(--fv-play);
+}
+
+.fv-voice-tip {
+  animation: fv-voice-tip var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-voice-rec .fv-voice-add {
+  animation: fv-voice-press-add var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-voice-add > i {
+  animation: fv-voice-square var(--fv-loop) linear infinite var(--fv-play);
+}
+
+.fv-voice .fv-voice-spin {
+  animation:
+    fv-voice-spinner var(--fv-loop) linear infinite var(--fv-play),
+    fv-voice-turn 0.9s linear infinite var(--fv-play);
+}
+
+.fv-voice-rec {
+  animation: fv-voice-rec var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-voice-bar {
+  animation: fv-voice-bar var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-voice-placeholder {
+  animation: fv-voice-placeholder var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-voice-words > span {
+  animation: fv-voice-word var(--fv-loop) cubic-bezier(0.2, 0.7, 0.2, 1)
+    calc(var(--i) * 70ms) infinite backwards var(--fv-play);
+}
+
+.fv-voice-send.is-bar {
+  animation: fv-voice-press-send var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-voice-mic::before {
+  animation: fv-voice-mic var(--fv-loop) ease infinite var(--fv-play);
+}
+
+@keyframes fv-voice-log {
+  0%,
+  71.25% {
+    opacity: 1;
+    transform: translateY(var(--fv-voice-lift));
+  }
+
+  76.25%,
+  92.5% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95% {
+    opacity: 0;
+    transform: none;
+  }
+
+  95.1% {
+    opacity: 0;
+    transform: translateY(var(--fv-voice-lift));
+  }
+
+  98.75%,
+  100% {
+    opacity: 1;
+    transform: translateY(var(--fv-voice-lift));
+  }
+}
+
+@keyframes fv-voice-sent {
+  0%,
+  72.5% {
+    opacity: 0;
+  }
+
+  77.5%,
+  92.5% {
+    opacity: 1;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-voice-scroll {
+  0% {
+    opacity: 1;
+    transform: translateX(-5.2%);
+  }
+
+  37.5% {
+    opacity: 1;
+    transform: translateX(-24.7%);
+  }
+
+  40%,
+  54% {
+    opacity: 0.35;
+    transform: translateX(-24.7%);
+  }
+
+  54.1%,
+  90% {
+    opacity: 1;
+    transform: none;
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(-5.2%);
+  }
+}
+
+@keyframes fv-voice-sweep {
+  0%,
+  38.7% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+
+  38.75% {
+    opacity: 1;
+    transform: translateX(-100%);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translateX(250%);
+  }
+
+  50.1%,
+  100% {
+    opacity: 0;
+    transform: translateX(250%);
+  }
+}
+
+@keyframes fv-voice-counter {
+  0%,
+  38.75% {
+    transform: translateX(40%);
+  }
+
+  50%,
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes fv-voice-tip {
+  0%,
+  31.25% {
+    opacity: 0;
+    transform: translate(-50%, 0.3em);
+  }
+
+  35%,
+  40% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  42.5%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes fv-voice-press-add {
+  0%,
+  37.5% {
+    transform: none;
+  }
+
+  38.75% {
+    transform: scale(0.88);
+  }
+
+  41.25%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-voice-square {
+  0%,
+  38.75% {
+    opacity: 1;
+  }
+
+  39%,
+  56.25% {
+    opacity: 0;
+  }
+
+  56.5%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-voice-spinner {
+  0%,
+  38.75% {
+    opacity: 0;
+  }
+
+  39%,
+  54% {
+    opacity: 1;
+  }
+
+  54.1%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-voice-turn {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes fv-voice-rec {
+  0%,
+  51.25% {
+    opacity: 1;
+    transform: none;
+  }
+
+  53.75%,
+  90% {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+
+  92.5%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-voice-bar {
+  0%,
+  51.25% {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+
+  53.75%,
+  70% {
+    opacity: 1;
+    transform: none;
+  }
+
+  71.25% {
+    opacity: 1;
+    transform: none;
+  }
+
+  90% {
+    opacity: 1;
+    transform: none;
+  }
+
+  92.5%,
+  100% {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+}
+
+@keyframes fv-voice-placeholder {
+  0%,
+  50% {
+    opacity: 1;
+  }
+
+  52.5%,
+  76.25% {
+    opacity: 0;
+  }
+
+  78.75%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-voice-word {
+  0%,
+  50% {
+    filter: blur(3px);
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  55%,
+  70% {
+    filter: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  73.75%,
+  100% {
+    filter: none;
+    opacity: 0;
+    transform: translateY(-0.7em);
+  }
+}
+
+@keyframes fv-voice-press-send {
+  0%,
+  51.25% {
+    opacity: 1;
+    transform: none;
+  }
+
+  70% {
+    opacity: 1;
+    transform: none;
+  }
+
+  71.25% {
+    opacity: 1;
+    transform: scale(0.88);
+  }
+
+  73.75% {
+    opacity: 0.5;
+    transform: none;
+  }
+
+  100% {
+    opacity: 0.5;
+    transform: none;
+  }
+}
+
+@keyframes fv-voice-mic {
+  0%,
+  85% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+
+  87.5%,
+  90% {
+    opacity: 1;
+    transform: none;
+  }
+
+  92.5%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@container (max-width: 200px) {
+  .fv-voice {
+    --fv-voice-lift: 0px;
+  }
+
+  .fv-voice-thread {
+    gap: 0.6em;
+    padding: 0.7em 0.9em;
+  }
+
+  .fv-voice .fv-voice-user,
+  .fv-voice-tools,
+  .fv-voice-tip,
+  .fv-voice-model {
+    display: none;
+  }
+
+  .fv-voice-bar {
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-voice *,
+  .fv-voice *::before {
+    animation: none !important;
+  }
+
+  .fv-voice .fv-voice-sent {
+    display: none;
+  }
+}

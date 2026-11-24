@@ -1,0 +1,425 @@
+.fv-state-machines-decision {
+  --smd-loop: 9s;
+  --smd-glow: color-mix(in oklab, var(--fv-attn) 6%, transparent);
+  --smd-lift: color-mix(in oklab, var(--fv-ink) 20%, transparent);
+  --smd-attn-text: var(--fv-attn-text);
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  padding: 1.3em 2.2em 0;
+  background:
+    radial-gradient(55% 45% at 50% 0, var(--smd-glow), transparent),
+    var(--fv-chrome);
+}
+
+.dark .fv-state-machines-decision {
+  --smd-glow: rgb(255 210 120 / 0.05);
+  --smd-lift: rgb(0 0 0 / 0.7);
+  --smd-attn-text: var(--fv-attn);
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-section {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  color: var(--fv-soft);
+  font-size: 0.86em;
+  font-weight: 600;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-section span {
+  padding: 0 0.5em;
+  border-radius: 99em;
+  background: var(--fv-select);
+  color: var(--fv-ink);
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 1em 1.2em 1.1em;
+  background: var(--fv-canvas);
+  box-shadow: 0 1.4em 3em -1.4em var(--smd-lift);
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-card header {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  white-space: nowrap;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-pill {
+  padding: 0.1em 0.65em;
+  border-radius: 99em;
+  background: color-mix(in oklab, var(--fv-attn) 20%, transparent);
+  color: var(--smd-attn-text);
+  font-size: 0.78em;
+  font-weight: 600;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-link {
+  color: var(--fv-soft);
+  font-size: 0.82em;
+  text-decoration: underline;
+  text-decoration-color: var(--fv-hair);
+  text-underline-offset: 0.2em;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-card h3 {
+  font-size: 1.15em;
+  font-weight: 600;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-body {
+  color: var(--fv-soft);
+  font-size: 0.88em;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-options li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  height: 1.95em;
+  padding: 0 0.7em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.55em;
+  white-space: nowrap;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-options li::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--fv-info);
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--fv-info) 10%, transparent);
+  opacity: 0;
+}
+
+.fv-state-machines-decision
+  .fv-state-machines-decision-options
+  li.is-picked::before {
+  opacity: 1;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-options b {
+  position: relative;
+  font-weight: 500;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-options span {
+  position: relative;
+  color: var(--fv-dim);
+  font-size: 0.85em;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-radio {
+  position: relative;
+  flex: none;
+  width: 0.95em;
+  height: 0.95em;
+  border: 1.5px solid var(--fv-hair);
+  border-radius: 50%;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-radio::after {
+  content: "";
+  position: absolute;
+  inset: 0.17em;
+  border-radius: 50%;
+  background: var(--fv-info);
+  transform: scale(0);
+}
+
+.fv-state-machines-decision .is-picked .fv-state-machines-decision-radio {
+  border-color: var(--fv-info);
+}
+
+.fv-state-machines-decision
+  .is-picked
+  .fv-state-machines-decision-radio::after {
+  transform: scale(1);
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-hint {
+  margin-top: 0.2em;
+  color: var(--fv-soft);
+  font-size: 0.82em;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-card footer {
+  display: flex;
+  gap: 0.6em;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-input {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  height: 2.1em;
+  padding: 0 0.7em;
+  overflow: hidden;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.55em;
+  background: var(--fv-chrome);
+  white-space: nowrap;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-typed {
+  position: relative;
+  font-size: 0.92em;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-cover {
+  position: absolute;
+  inset: 0 0 0 0.6em;
+  background: var(--fv-chrome);
+  transform: scaleX(0);
+  transform-origin: right;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-confirm {
+  display: grid;
+  place-items: center;
+  padding: 0 1.1em;
+  border-radius: 0.55em;
+  background: var(--fv-ink);
+  color: var(--fv-canvas);
+  font-size: 0.92em;
+  font-weight: 600;
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-done {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.7em 1.1em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 99em;
+  background: var(--fv-raise);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+}
+
+.fv-state-machines-decision .fv-state-machines-decision-done svg {
+  width: 1.2em;
+  height: 1.2em;
+  fill: none;
+  stroke: var(--fv-ok);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-state-machines-decision .fv-state-machines-decision-card {
+    animation: fv-state-machines-decision-card var(--smd-loop) var(--fv-swap)
+      infinite;
+  }
+
+  .fv-state-machines-decision
+    .fv-state-machines-decision-options
+    li.is-picked::before {
+    animation: fv-state-machines-decision-pick var(--smd-loop) linear infinite;
+  }
+
+  .fv-state-machines-decision
+    .is-picked
+    .fv-state-machines-decision-radio::after {
+    animation: fv-state-machines-decision-dot var(--smd-loop) var(--fv-swap)
+      infinite;
+  }
+
+  .fv-state-machines-decision .fv-state-machines-decision-hint,
+  .fv-state-machines-decision .fv-state-machines-decision-input {
+    animation: fv-state-machines-decision-field var(--smd-loop) linear infinite;
+  }
+
+  .fv-state-machines-decision .fv-state-machines-decision-cover {
+    animation: fv-state-machines-decision-type var(--smd-loop) steps(40, end)
+      infinite;
+  }
+
+  .fv-state-machines-decision .fv-state-machines-decision-confirm {
+    animation: fv-state-machines-decision-confirm var(--smd-loop) linear
+      infinite;
+  }
+
+  .fv-state-machines-decision .fv-state-machines-decision-section span {
+    animation: fv-state-machines-decision-count var(--smd-loop) linear infinite;
+  }
+
+  .fv-state-machines-decision .fv-state-machines-decision-done {
+    animation: fv-state-machines-decision-done var(--smd-loop) var(--fv-swap)
+      infinite;
+  }
+}
+
+@keyframes fv-state-machines-decision-card {
+  0%,
+  66% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  71%,
+  94% {
+    opacity: 0;
+    transform: translateY(-0.6em) scale(0.98);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fv-state-machines-decision-pick {
+  0%,
+  13% {
+    opacity: 0;
+  }
+
+  16%,
+  90% {
+    opacity: 1;
+  }
+
+  92%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-state-machines-decision-dot {
+  0%,
+  13% {
+    transform: scale(0);
+  }
+
+  17%,
+  90% {
+    transform: scale(1);
+  }
+
+  92%,
+  100% {
+    transform: scale(0);
+  }
+}
+
+@keyframes fv-state-machines-decision-field {
+  0%,
+  16% {
+    opacity: 0.35;
+  }
+
+  20%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-state-machines-decision-type {
+  0%,
+  22% {
+    transform: scaleX(1);
+  }
+
+  50%,
+  90% {
+    transform: scaleX(0);
+  }
+
+  92%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes fv-state-machines-decision-confirm {
+  0%,
+  52% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+
+  55%,
+  60% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  62% {
+    opacity: 1;
+    transform: scale(0.93);
+  }
+
+  65%,
+  90% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  92%,
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+}
+
+@keyframes fv-state-machines-decision-count {
+  0%,
+  68% {
+    opacity: 1;
+  }
+
+  72%,
+  96% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-state-machines-decision-done {
+  0%,
+  69% {
+    opacity: 0;
+    transform: translate(-50%, -30%);
+  }
+
+  74%,
+  92% {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+
+  96%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%);
+  }
+}
+
+.fv-state-machines-decision > * {
+  flex: none;
+}

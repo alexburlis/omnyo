@@ -1,0 +1,488 @@
+.fv.fv-codex-gui-picker {
+  --xp-loop: 8s;
+  --xp-col: 2.55em;
+  --xp-row: 1.9em;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-canvas);
+}
+
+.fv-codex-gui-picker .fv-xp-thread {
+  position: absolute;
+  top: 1.2em;
+  left: 2em;
+  right: 2em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  font-size: 0.9em;
+}
+
+.fv-codex-gui-picker .fv-xp-you {
+  align-self: flex-end;
+  padding: 0.35em 0.9em;
+  border-radius: 1em;
+  background: var(--fv-select);
+}
+
+.fv-codex-gui-picker .fv-xp-say {
+  color: var(--fv-soft);
+}
+
+.fv-codex-gui-picker .fv-xp-pop {
+  position: absolute;
+  left: 1.6em;
+  bottom: 5.4em;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 0.7em 0.8em 0.6em;
+  background: var(--fv-chrome);
+  box-shadow: 0 1.4em 2.8em -1em var(--fv-shade);
+}
+
+.fv-codex-gui-picker .fv-xp-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: 0.82em;
+}
+
+.fv-codex-gui-picker .fv-xp-head b {
+  font-weight: 600;
+}
+
+.fv-codex-gui-picker .fv-xp-keys {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  margin-left: auto;
+  font-size: 0.86em;
+}
+
+.fv-codex-gui-picker .fv-xp-mark {
+  width: 1.05em;
+  height: 1.05em;
+  fill: none;
+  stroke: var(--fv-ink);
+  stroke-width: 1.1;
+}
+
+.fv-codex-gui-picker .fv-xp-grid {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  width: calc(6.4em + 7 * var(--xp-col));
+}
+
+.fv-codex-gui-picker .fv-xp-grid > span:first-child {
+  width: 6.4em;
+}
+
+.fv-codex-gui-picker .fv-xp-level {
+  font-size: 0.6em;
+  width: calc(var(--xp-col) / 0.6);
+  line-height: 2.2;
+  text-align: center;
+  color: var(--fv-dim);
+}
+
+.fv-codex-gui-picker .fv-xp-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: var(--xp-row);
+  border-radius: 0.5em;
+}
+
+.fv-codex-gui-picker .fv-xp-row.is-on {
+  background: var(--fv-raise);
+}
+
+.fv-codex-gui-picker .fv-xp-model {
+  width: calc(6.4em / 0.84);
+  padding-left: 0.5em;
+  overflow: hidden;
+  font-size: 0.84em;
+  font-weight: 560;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-codex-gui-picker .fv-xp-row:not(.is-on) .fv-xp-model {
+  font-weight: 400;
+  color: var(--fv-soft);
+}
+
+.fv-codex-gui-picker .fv-xp-cell {
+  display: grid;
+  place-items: center;
+  width: var(--xp-col);
+}
+
+.fv-codex-gui-picker .fv-xp-cell i {
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: var(--fv-hair);
+}
+
+.fv-codex-gui-picker .fv-xp-pick {
+  position: absolute;
+  top: calc(0.6em * 2.2 + 0.1em);
+  left: calc(6.4em + 3 * var(--xp-col) + 0.1em);
+  width: calc(var(--xp-col) - 0.2em);
+  height: calc(var(--xp-row) - 0.2em);
+  border: 1px solid color-mix(in oklch, var(--fv-info) 70%, transparent);
+  border-radius: 0.5em;
+  background: color-mix(in oklab, var(--fv-info) 20%, transparent);
+  transform: translateX(calc(2 * var(--xp-col)));
+}
+
+.fv-codex-gui-picker .fv-xp-pick::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.45em;
+  height: 0.45em;
+  margin: -0.225em;
+  border-radius: 50%;
+  background: var(--fv-info);
+}
+
+.fv-codex-gui-picker .fv-xp-composer {
+  position: absolute;
+  left: 1.2em;
+  right: 1.2em;
+  bottom: 0.9em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.7em 0.8em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 1em;
+  background: var(--fv-raise);
+}
+
+.fv-codex-gui-picker .fv-xp-placeholder {
+  font-size: 0.9em;
+  color: var(--fv-dim);
+}
+
+.fv-codex-gui-picker .fv-xp-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.fv-codex-gui-picker .fv-xp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.2em 0.65em;
+  border-radius: 0.55em;
+  background: var(--fv-select);
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.fv-codex-gui-picker .fv-xp-chip.is-mode {
+  background: transparent;
+  color: var(--fv-soft);
+}
+
+.fv-codex-gui-picker .fv-xp-swap,
+.fv-codex-gui-picker .fv-xp-tier {
+  display: inline-grid;
+  color: var(--fv-soft);
+}
+
+.fv-codex-gui-picker .fv-xp-swap > span,
+.fv-codex-gui-picker .fv-xp-tier > span {
+  grid-area: 1 / 1;
+}
+
+.fv-codex-gui-picker .fv-xp-swap > .is-a,
+.fv-codex-gui-picker .fv-xp-tier > .is-fast {
+  opacity: 0;
+}
+
+.fv-codex-gui-picker .fv-xp-bolt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.2em 0.5em;
+  border-radius: 0.55em;
+  background: color-mix(in oklab, var(--fv-attn) 18%, transparent);
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.fv-codex-gui-picker .fv-xp-bolt svg {
+  width: 1.1em;
+  height: 1.1em;
+  fill: var(--fv-attn);
+}
+
+.fv-codex-gui-picker .fv-xp-tier {
+  color: var(--fv-attn-text);
+}
+
+.fv-codex-gui-picker .fv-xp-send {
+  display: grid;
+  place-items: center;
+  width: 1.8em;
+  height: 1.8em;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--fv-ink);
+}
+
+.fv-codex-gui-picker .fv-xp-send svg {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: var(--fv-canvas);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-codex-gui-picker
+  :where(
+    .fv-xp-pop,
+    .fv-xp-pick,
+    .fv-key.is-right,
+    .fv-key.is-enter,
+    .fv-xp-swap > span,
+    .fv-xp-tier > span,
+    .fv-xp-bolt
+  ) {
+  animation: var(--xp-loop) var(--fv-swap) infinite both;
+}
+
+.fv-codex-gui-picker .fv-xp-pop {
+  animation-name: fv-xp-pop;
+}
+
+.fv-codex-gui-picker .fv-xp-pick {
+  animation-name: fv-xp-pick;
+}
+
+.fv-codex-gui-picker .fv-key.is-right {
+  animation-name: fv-xp-right;
+}
+
+.fv-codex-gui-picker .fv-key.is-enter {
+  animation-name: fv-xp-enter;
+}
+
+.fv-codex-gui-picker .fv-xp-swap > .is-a {
+  animation-name: fv-xp-swap-a;
+}
+
+.fv-codex-gui-picker .fv-xp-swap > .is-b {
+  animation-name: fv-xp-swap-b;
+}
+
+.fv-codex-gui-picker .fv-xp-tier > .is-fast {
+  animation-name: fv-xp-fast;
+}
+
+.fv-codex-gui-picker .fv-xp-tier > .is-ultra {
+  animation-name: fv-xp-ultra;
+}
+
+.fv-codex-gui-picker .fv-xp-bolt {
+  animation-name: fv-xp-bolt;
+}
+
+@keyframes fv-xp-pop {
+  0%,
+  44% {
+    opacity: 1;
+    transform: none;
+  }
+
+  50%,
+  94% {
+    opacity: 0;
+    transform: translateY(0.6em) scale(0.97);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-xp-pick {
+  0%,
+  15% {
+    transform: none;
+  }
+
+  20%,
+  28% {
+    transform: translateX(var(--xp-col));
+  }
+
+  33%,
+  60% {
+    transform: translateX(calc(2 * var(--xp-col)));
+  }
+
+  70%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-xp-right {
+  0%,
+  15%,
+  19%,
+  28%,
+  32%,
+  100% {
+    transform: none;
+  }
+
+  17%,
+  30% {
+    transform: translateY(0.08em) scale(0.85);
+  }
+}
+
+@keyframes fv-xp-enter {
+  0%,
+  38%,
+  44%,
+  100% {
+    transform: none;
+  }
+
+  41% {
+    transform: translateY(0.08em) scale(0.85);
+  }
+}
+
+@keyframes fv-xp-swap-a {
+  0%,
+  46% {
+    opacity: 1;
+  }
+
+  49%,
+  95% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-xp-swap-b {
+  0%,
+  46% {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  50%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-xp-bolt {
+  0%,
+  57% {
+    opacity: 0.45;
+    transform: none;
+  }
+
+  59% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+
+  62%,
+  71% {
+    opacity: 1;
+    transform: none;
+  }
+
+  73% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+
+  76%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+
+  97%,
+  100% {
+    opacity: 0.45;
+    transform: none;
+  }
+}
+
+@keyframes fv-xp-fast {
+  0%,
+  58% {
+    opacity: 0;
+  }
+
+  61%,
+  72% {
+    opacity: 1;
+  }
+
+  74%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-xp-ultra {
+  0%,
+  72% {
+    opacity: 0;
+  }
+
+  75%,
+  93% {
+    opacity: 1;
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-codex-gui-picker *,
+  .fv-codex-gui-picker *::before,
+  .fv-codex-gui-picker *::after {
+    animation: none !important;
+  }
+}
+
+.dark .fv-codex-gui-picker {
+  --fv-shade: rgb(0 0 0 / 0.85);
+}

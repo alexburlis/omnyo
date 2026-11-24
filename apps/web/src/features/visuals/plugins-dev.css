@@ -1,0 +1,391 @@
+.fv-plugins-dev {
+  --pd-loop: 9s;
+
+  display: grid;
+  grid-template-columns: 15em minmax(0, 1fr);
+  gap: 1em;
+  padding: 1.4em;
+  background:
+    radial-gradient(60% 70% at 100% 100%, rgb(255 79 23 / 0.07), transparent),
+    var(--fv-canvas);
+}
+
+.fv-plugins-dev .fv-pd-term {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.8em;
+  background: var(--fv-chrome);
+  overflow: hidden;
+}
+
+.dark .fv-plugins-dev .fv-pd-term {
+  background: oklch(0.13 0.008 268);
+}
+
+.fv-plugins-dev .fv-pd-term-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--fv-seam);
+  font-size: 0.8em;
+  color: var(--fv-dim);
+}
+
+.fv-plugins-dev .fv-pd-term-bar i {
+  width: 0.65em;
+  height: 0.65em;
+  border-radius: 50%;
+  background: var(--fv-hair);
+}
+
+.fv-plugins-dev .fv-pd-term-bar span {
+  margin-left: 0.6em;
+}
+
+.fv-plugins-dev .fv-pd-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  padding: 0.9em 0.9em;
+  font-size: 0.8em;
+  line-height: 1.35;
+}
+
+.fv-plugins-dev .fv-pd-lines p {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  animation: var(--pd-loop) ease-out infinite both;
+}
+
+.fv-plugins-dev .fv-pd-lines b {
+  color: var(--fv-accent-text);
+  font-weight: 600;
+}
+
+.fv-plugins-dev .fv-pd-lines em {
+  font-style: normal;
+  color: var(--fv-ok);
+}
+
+.fv-plugins-dev .fv-pd-lines .fv-pd-l1 {
+  animation-name: fv-pd-l1;
+}
+
+.fv-plugins-dev .fv-pd-lines .fv-pd-l2 {
+  animation-name: fv-pd-l2;
+}
+
+.fv-plugins-dev .fv-pd-lines .fv-pd-l3 {
+  animation-name: fv-pd-l3;
+}
+
+.fv-plugins-dev .fv-pd-lines .fv-pd-l4 {
+  animation-name: fv-pd-l4;
+}
+
+.fv-plugins-dev .fv-pd-lines .fv-pd-l5 {
+  animation-name: fv-pd-l5;
+}
+
+.fv-plugins-dev .fv-pd-lines .fv-pd-l6 {
+  animation-name: fv-pd-l6;
+}
+
+.fv-plugins-dev .fv-pd-lines .fv-pd-l7 {
+  animation-name: fv-pd-l7;
+}
+
+.fv-plugins-dev .fv-pd-app {
+  display: grid;
+  grid-template-columns: 7.8em minmax(0, 1fr);
+  min-width: 0;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.8em;
+  overflow: hidden;
+}
+
+.fv-plugins-dev .fv-pd-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15em;
+  padding: 0.9em 0.5em;
+  border-right: 1px solid var(--fv-seam);
+  background: var(--fv-side);
+  font-size: 0.86em;
+}
+
+.fv-plugins-dev .fv-pd-side .fv-eyebrow {
+  margin: 0.8em 0 0.2em 0.55em;
+}
+
+.fv-plugins-dev .fv-pd-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.32em 0.55em;
+  border-radius: 0.45em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.fv-plugins-dev .fv-pd-row.is-new {
+  background: var(--fv-select);
+  animation: fv-pd-new var(--pd-loop) cubic-bezier(0.2, 0.8, 0.2, 1) infinite
+    both;
+}
+
+.fv-plugins-dev .fv-pd-row.is-new i {
+  width: 0.75em;
+  height: 0.75em;
+  border-radius: 0.2em;
+  background: var(--fv-accent);
+}
+
+.fv-plugins-dev .fv-pd-panel {
+  display: grid;
+  place-items: center;
+  padding: 1em;
+}
+
+.fv-plugins-dev .fv-pd-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  width: 100%;
+  max-width: 100%;
+  padding: 1em 1.1em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.8em;
+  background: var(--fv-raise);
+  font-size: 0.92em;
+  animation: fv-pd-card var(--pd-loop) cubic-bezier(0.2, 0.8, 0.2, 1) infinite
+    both;
+}
+
+.fv-plugins-dev .fv-pd-big {
+  font-size: 2em;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.fv-plugins-dev .fv-pd-over {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  margin-top: 0.4em;
+  padding-top: 0.5em;
+  border-top: 1px solid var(--fv-seam);
+  color: var(--fv-attn-text);
+  white-space: nowrap;
+  animation: fv-pd-over var(--pd-loop) cubic-bezier(0.2, 0.8, 0.2, 1) infinite
+    both;
+}
+
+@keyframes fv-pd-l1 {
+  0%,
+  2% {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  6%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pd-l2 {
+  0%,
+  9% {
+    opacity: 0;
+  }
+
+  12%,
+  94% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pd-l3 {
+  0%,
+  16% {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  20%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pd-l4 {
+  0%,
+  23% {
+    opacity: 0;
+  }
+
+  26%,
+  94% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pd-l5 {
+  0%,
+  31% {
+    opacity: 0;
+  }
+
+  34%,
+  94% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pd-l6 {
+  0%,
+  56% {
+    opacity: 0;
+  }
+
+  59%,
+  94% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pd-l7 {
+  0%,
+  63% {
+    opacity: 0;
+  }
+
+  66%,
+  94% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pd-new {
+  0%,
+  33% {
+    opacity: 0;
+    transform: translateX(-1.2em);
+  }
+
+  38%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pd-card {
+  0%,
+  35% {
+    opacity: 0;
+    transform: translateY(0.8em) scale(0.97);
+  }
+
+  41%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-pd-over {
+  0%,
+  65% {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  69%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-plugins-dev *,
+  .fv-plugins-dev *::before,
+  .fv-plugins-dev *::after {
+    animation: none !important;
+  }
+}
+
+@container (max-width: 520px) {
+  .fv-plugins-dev {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    padding: 1em;
+    gap: 0.7em;
+  }
+
+  .fv-plugins-dev .fv-pd-app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fv-plugins-dev .fv-pd-side {
+    display: none;
+  }
+}

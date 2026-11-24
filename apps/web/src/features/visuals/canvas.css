@@ -1,0 +1,1067 @@
+.dark .fv-canvas {
+  --fv-canvas-blue: oklch(0.77 0.11 252);
+  --fv-canvas-teal: oklch(0.8 0.09 190);
+  --fv-canvas-warning: oklch(0.75 0.16 50);
+  --fv-canvas-primary: oklch(0.82 0.008 267);
+  --fv-canvas-red: oklch(0.65 0.16 22);
+}
+
+.fv-canvas {
+  --fv-canvas-blue: oklch(0.6 0.12 252);
+  --fv-canvas-teal: oklch(0.6 0.09 190);
+  --fv-canvas-warning: oklch(0.55 0.14 50);
+  --fv-canvas-primary: oklch(0.42 0.012 268);
+  --fv-canvas-muted: color-mix(in oklch, var(--fv-ink) 16%, var(--fv-canvas));
+  --fv-canvas-red: oklch(0.58 0.18 25);
+  --fv-loop: 8s;
+  --fv-play: paused;
+
+  display: grid;
+  grid-template-columns: 27% minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.fv-canvas svg {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-canvas-chat {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.7em;
+  min-width: 0;
+  padding: 0.9em 0.85em 0.8em;
+  font-size: 0.92em;
+}
+
+.fv-canvas .fv-canvas-user {
+  align-self: flex-end;
+  max-width: 96%;
+  padding: 0.5em 0.75em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 1em;
+  background: var(--fv-raise);
+  line-height: 1.4;
+}
+
+.fv-canvas .fv-canvas-swap {
+  display: grid;
+}
+
+.fv-canvas-pre-swap {
+  display: inline-grid;
+}
+
+.fv-canvas-swap > *,
+.fv-canvas-pre-swap > * {
+  grid-area: 1 / 1;
+}
+
+.fv-canvas-working {
+  color: var(--fv-dim);
+}
+
+.fv-canvas-done {
+  color: var(--fv-ink);
+}
+
+.fv-canvas .fv-canvas-say {
+  line-height: 1.45;
+}
+
+.fv-canvas-composer {
+  padding: 0.6em 0.65em 0.5em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 1em;
+  background: var(--fv-raise);
+}
+
+.fv-canvas .fv-canvas-composer > p:first-child {
+  padding: 0 0.2em 0.9em;
+  color: var(--fv-dim);
+  line-height: 1.35;
+}
+
+.fv-canvas .fv-canvas-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  color: var(--fv-soft);
+}
+
+.fv-canvas-bar .fv-canvas-mark {
+  stroke-width: 2.4;
+}
+
+.fv-canvas-stop {
+  display: grid;
+  place-items: center;
+  width: 1.85em;
+  height: 1.85em;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--fv-select);
+}
+
+.fv-canvas-stop > * {
+  grid-area: 1 / 1;
+}
+
+.fv-canvas-stop i {
+  width: 0.65em;
+  height: 0.65em;
+  border-radius: 0.15em;
+  background: var(--fv-ink);
+  opacity: 0;
+}
+
+.fv-canvas-stop svg {
+  width: 1em;
+  height: 1em;
+  color: var(--fv-ink);
+  stroke-width: 2.2;
+}
+
+.fv-canvas-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-left: 1px solid var(--fv-seam);
+  color: var(--fv-soft);
+}
+
+.fv-canvas-tabs,
+.fv-canvas-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.fv-canvas-tabs {
+  gap: 0.6em;
+  height: 2.6em;
+  padding: 0 0.8em;
+}
+
+.fv-canvas-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  height: 1.9em;
+  padding: 0 0.7em;
+  border-radius: 0.5em;
+  background: var(--fv-select);
+  color: var(--fv-ink);
+  font-size: 0.92em;
+}
+
+.fv-canvas-tab svg {
+  width: 1em;
+  height: 1em;
+}
+
+.fv-canvas-end {
+  margin-left: auto;
+}
+
+.fv-canvas-toolbar {
+  gap: 0.3em;
+  height: 2.6em;
+  padding: 0 0.6em;
+  border-block: 1px solid var(--fv-seam);
+}
+
+.fv-canvas-chip {
+  padding: 0.1em 0.6em;
+  border-radius: 99em;
+  font-size: 0.82em;
+}
+
+.fv-canvas-chip.is-new {
+  background: color-mix(in oklab, var(--fv-ok) 18%, transparent);
+  color: color-mix(in oklch, var(--fv-ok) 45%, var(--fv-ink));
+}
+
+.fv-canvas-chip.is-updated {
+  position: relative;
+  display: inline-flex;
+  gap: 0.3em;
+  background: color-mix(in oklab, var(--fv-attn) 12%, transparent);
+  color: var(--fv-canvas-warning);
+}
+
+.fv-canvas-chip.is-updated::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid currentColor;
+  border-radius: inherit;
+  opacity: 0;
+}
+
+.fv-canvas-count {
+  display: inline-flex;
+  flex-direction: column;
+  height: 1.45em;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-canvas-count > span {
+  transform: translateY(-100%);
+}
+
+.fv-canvas-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.85em;
+  margin-left: auto;
+  padding-right: 0.25em;
+}
+
+.fv-canvas-tools svg {
+  width: 1.05em;
+  height: 1.05em;
+}
+
+.fv-canvas-tools i {
+  width: 1px;
+  height: 1.1em;
+  background: var(--fv-hair);
+}
+
+.fv-canvas-board {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background-color: color-mix(in oklab, var(--fv-ink) 6%, var(--fv-canvas));
+  background-image: radial-gradient(
+    color-mix(in oklab, var(--fv-ink) 14%, transparent) 1px,
+    transparent 1.2px
+  );
+  background-position: 0.4em 0.4em;
+  background-size: 1.4em 1.4em;
+}
+
+.fv-canvas-board::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 3.6em;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in oklab, var(--fv-ink) 6%, var(--fv-canvas))
+  );
+  pointer-events: none;
+}
+
+.fv-canvas-island {
+  --fv-canvas-tone: var(--fv-canvas-blue);
+
+  position: absolute;
+  border-radius: 1.4em;
+  background: color-mix(
+    in oklab,
+    var(--fv-canvas-tone) 3.5%,
+    color-mix(in oklab, var(--fv-ink) 7%, var(--fv-canvas))
+  );
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--fv-ink) 7%, transparent);
+}
+
+.fv-canvas-island.is-blue {
+  top: 0.9em;
+  left: 1.1em;
+  width: 22em;
+  height: 16.2em;
+}
+
+.fv-canvas-island.is-teal {
+  --fv-canvas-tone: var(--fv-canvas-teal);
+
+  top: 2.2em;
+  left: 24.2em;
+  width: 15em;
+  height: 12em;
+}
+
+.fv-canvas .fv-canvas-head {
+  position: absolute;
+  top: 1em;
+  left: 1.3em;
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  color: var(--fv-canvas-tone);
+  font-size: 0.72em;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.fv-canvas-head i {
+  width: 0.75em;
+  height: 0.75em;
+  border-radius: 0.25em;
+  background: var(--fv-canvas-tone);
+}
+
+.fv-canvas .fv-canvas-question {
+  position: absolute;
+  top: 1.75em;
+  left: 1.1em;
+  right: 1em;
+  color: var(--fv-ink);
+  font-size: 1.12em;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.fv-canvas-node {
+  position: absolute;
+  padding: 0.3em 0.55em 0.5em;
+  border-radius: 0.6em;
+  color: var(--fv-ink);
+}
+
+.fv-canvas-node.is-new {
+  outline: 2px solid var(--fv-ok);
+  outline-offset: 2px;
+}
+
+.fv-canvas-ring {
+  position: absolute;
+  inset: -4px;
+  border: 2px solid var(--fv-attn);
+  border-radius: calc(0.6em + 4px);
+  pointer-events: none;
+}
+
+.fv-canvas-flag {
+  position: absolute;
+  top: -0.7em;
+  right: 0.7em;
+  padding: 0 0.45em;
+  border-radius: 99em;
+  background: var(--fv-ok);
+  color: var(--fv-canvas);
+  font-size: 0.66em;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.fv-canvas-flag.is-updated {
+  z-index: 1;
+  background: var(--fv-attn);
+}
+
+.fv-canvas .fv-canvas-title {
+  font-size: 0.84em;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  white-space: nowrap;
+}
+
+.fv-canvas-chart {
+  top: 4.4em;
+  left: 0.8em;
+  width: 10em;
+}
+
+.fv-canvas .fv-canvas-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.9em;
+  height: 4.6em;
+  margin: 0.6em 0.3em 1.4em;
+  border-bottom: 1px solid var(--fv-hair);
+}
+
+.fv-canvas-bars li {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  height: 100%;
+}
+
+.fv-canvas-bars i {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 0.25em 0.25em 0 0;
+  background: color-mix(in oklab, var(--fv-canvas-blue) 80%, var(--fv-canvas));
+  transform-origin: 50% 100%;
+}
+
+.fv-canvas-bars li.is-fix i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--fv-canvas-red);
+  opacity: 0;
+}
+
+.fv-canvas-bars span {
+  position: absolute;
+  top: calc(100% + 0.35em);
+  left: -0.5em;
+  right: -0.5em;
+  color: var(--fv-soft);
+  font-size: 0.66em;
+  text-align: center;
+}
+
+.fv-canvas-column {
+  position: absolute;
+  top: 4.4em;
+  left: 11.5em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  width: 9.8em;
+}
+
+.fv-canvas-column .fv-canvas-node {
+  position: relative;
+  padding-block: 0.2em 0.3em;
+}
+
+.fv-canvas .fv-canvas-state {
+  margin-top: 0.35em;
+  font-size: 0.8em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fv-canvas-state > span {
+  opacity: 0;
+}
+
+.fv-canvas-state > .is-done {
+  color: var(--fv-ok);
+  opacity: 1;
+}
+
+.fv-canvas-progress {
+  display: block;
+  height: 0.38em;
+  margin: 0.3em 0 0.25em;
+  overflow: hidden;
+  border-radius: 0.2em;
+  background: var(--fv-canvas-muted);
+}
+
+.fv-canvas-progress i {
+  display: block;
+  height: 100%;
+  background: var(--fv-canvas-primary);
+  transform-origin: 0 50%;
+}
+
+.fv-canvas .fv-canvas-body {
+  color: var(--fv-ink);
+  font-size: 0.76em;
+  line-height: 1.4;
+}
+
+.fv-canvas .fv-canvas-code pre {
+  margin: 0.4em 0 0;
+  padding: 0.5em 0.6em;
+  overflow: hidden;
+  border-radius: 0.4em;
+  background: color-mix(in oklab, var(--fv-ink) 6%, transparent);
+  font-family: var(--fv-mono);
+  color: var(--fv-ink);
+  font-size: 0.6em;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.fv-canvas-code pre b {
+  color: var(--fv-canvas-red);
+  font-weight: 500;
+  opacity: 0;
+}
+
+.fv-canvas-code pre b.is-ok {
+  color: var(--fv-ok);
+  opacity: 1;
+}
+
+.fv-canvas-code .fv-canvas-title > span:first-child,
+.fv-canvas-working {
+  opacity: 0;
+}
+
+.fv-canvas-island.is-teal .fv-canvas-node {
+  top: 4.4em;
+  left: 0.8em;
+  width: 12.5em;
+}
+
+.fv-canvas .fv-canvas-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6em;
+  margin-top: 0.45em;
+  padding: 0.45em 0.6em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.4em;
+  background: color-mix(in oklab, var(--fv-ink) 2.5%, transparent);
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+
+.fv-canvas .fv-canvas-option.is-pick {
+  border-color: var(--fv-canvas-primary);
+}
+
+.fv-canvas-option em {
+  color: var(--fv-soft);
+  font-size: 0.82em;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.fv-canvas-map {
+  position: absolute;
+  bottom: 0.8em;
+  left: 0.8em;
+  width: 7em;
+  height: 4.4em;
+  overflow: hidden;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.6em;
+  background: var(--fv-canvas);
+  opacity: 0.86;
+}
+
+.fv-canvas-map i {
+  position: absolute;
+  border-radius: 0.15em;
+}
+
+.fv-canvas-map .is-blue {
+  top: 14%;
+  left: 8%;
+  width: 46%;
+  height: 62%;
+  background: color-mix(in oklab, var(--fv-canvas-blue) 14%, transparent);
+}
+
+.fv-canvas-map .is-teal {
+  top: 22%;
+  left: 60%;
+  width: 32%;
+  height: 44%;
+  background: color-mix(in oklab, var(--fv-canvas-teal) 14%, transparent);
+}
+
+.fv-canvas-map .is-view {
+  top: 8%;
+  left: 4%;
+  width: 70%;
+  height: 74%;
+  border: 1.5px solid var(--fv-canvas-primary);
+  border-radius: 0.2em;
+}
+
+.fv-canvas-zoom {
+  position: absolute;
+  z-index: 1;
+  right: 0.8em;
+  bottom: 0.8em;
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
+  padding: 0.15em 0.35em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 99em;
+  background: var(--fv-canvas);
+  font-size: 0.82em;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-canvas-zoom svg {
+  width: 1.05em;
+  height: 1.05em;
+  margin: 0 0.35em;
+}
+
+.fv-canvas-zoom span {
+  min-width: 3em;
+  text-align: center;
+}
+
+.fv-canvas .fv-canvas-earlier {
+  display: none;
+}
+
+@container (min-width: 700px) {
+  .fv-canvas .fv-canvas-earlier {
+    display: block;
+  }
+}
+
+@container (max-width: 700px) {
+  .fv-canvas-map,
+  .fv-canvas-zoom {
+    display: none;
+  }
+}
+
+.fv-box[data-live] .fv-canvas {
+  --fv-play: running;
+}
+
+.fv-canvas-progress i {
+  animation: fv-canvas-progress var(--fv-loop) ease-in-out infinite
+    var(--fv-play);
+}
+
+.fv-canvas-state > span:nth-child(1) {
+  animation: fv-canvas-state-a var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-canvas-state > span:nth-child(2) {
+  animation: fv-canvas-state-b var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-canvas-state > span:nth-child(3) {
+  animation: fv-canvas-state-c var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-canvas-parser .fv-canvas-ring {
+  animation: fv-canvas-ring-a var(--fv-loop) ease-out infinite var(--fv-play);
+}
+
+.fv-canvas-parser .fv-canvas-flag {
+  animation: fv-canvas-flag-a var(--fv-loop) cubic-bezier(0.3, 1.4, 0.5, 1)
+    infinite var(--fv-play);
+}
+
+.fv-canvas-code .fv-canvas-ring {
+  animation: fv-canvas-ring-b var(--fv-loop) ease-out infinite var(--fv-play);
+}
+
+.fv-canvas-code .fv-canvas-flag {
+  animation: fv-canvas-flag-b var(--fv-loop) cubic-bezier(0.3, 1.4, 0.5, 1)
+    infinite var(--fv-play);
+}
+
+.fv-canvas-code .fv-canvas-title > span:first-child,
+.fv-canvas-code pre b:first-child {
+  animation: fv-canvas-out-b var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-canvas-code .fv-canvas-title > span:last-child,
+.fv-canvas-code pre b.is-ok {
+  animation: fv-canvas-in-b var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-canvas-chip.is-updated {
+  animation: fv-canvas-chip var(--fv-loop) ease-out infinite var(--fv-play);
+}
+
+.fv-canvas-chip.is-updated::after {
+  animation: fv-canvas-ping var(--fv-loop) ease-out infinite var(--fv-play);
+}
+
+.fv-canvas-count > span {
+  animation: fv-canvas-count var(--fv-loop) cubic-bezier(0.3, 0, 0.2, 1)
+    infinite var(--fv-play);
+}
+
+.fv-canvas-bars li.is-fix i {
+  animation: fv-canvas-bar var(--fv-loop) cubic-bezier(0.3, 0, 0.15, 1) infinite
+    var(--fv-play);
+}
+
+.fv-canvas-bars li.is-fix i::after {
+  animation: fv-canvas-bar-red var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-canvas-working,
+.fv-canvas-stop i {
+  animation: fv-canvas-out-c var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-canvas-done,
+.fv-canvas-stop svg {
+  animation: fv-canvas-in-c var(--fv-loop) ease infinite var(--fv-play);
+}
+
+@keyframes fv-canvas-progress {
+  0%,
+  7.5% {
+    opacity: 1;
+    transform: scaleX(0.6);
+  }
+
+  32.5%,
+  91.25% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+
+  94.9% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+
+  95% {
+    opacity: 0;
+    transform: scaleX(0.6);
+  }
+
+  98.75%,
+  100% {
+    opacity: 1;
+    transform: scaleX(0.6);
+  }
+}
+
+@keyframes fv-canvas-state-a {
+  0%,
+  18.75% {
+    opacity: 1;
+  }
+
+  21.25%,
+  93.75% {
+    opacity: 0;
+  }
+
+  97.5%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-canvas-state-b {
+  0%,
+  18.75% {
+    opacity: 0;
+  }
+
+  21.25%,
+  31.25% {
+    opacity: 1;
+  }
+
+  33.75%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-canvas-state-c {
+  0%,
+  31.25% {
+    opacity: 0;
+  }
+
+  33.75%,
+  92.5% {
+    opacity: 1;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-canvas-ring-a {
+  0%,
+  33.75% {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+
+  37.5%,
+  92.5% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-canvas-flag-a {
+  0%,
+  33.75% {
+    opacity: 0;
+    transform: translateY(0.5em) scale(0.6);
+  }
+
+  37.5%,
+  92.5% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-canvas-ring-b {
+  0%,
+  43.75% {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+
+  47.5%,
+  92.5% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-canvas-flag-b {
+  0%,
+  43.75% {
+    opacity: 0;
+    transform: translateY(0.5em) scale(0.6);
+  }
+
+  47.5%,
+  92.5% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-canvas-out-b {
+  0%,
+  42.5% {
+    opacity: 1;
+  }
+
+  45%,
+  93.75% {
+    opacity: 0;
+  }
+
+  97.5%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-canvas-in-b {
+  0%,
+  42.5% {
+    opacity: 0;
+  }
+
+  45%,
+  92.5% {
+    opacity: 1;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-canvas-chip {
+  0%,
+  33.75% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+
+  36.25% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+
+  38.75%,
+  92.5% {
+    opacity: 1;
+    transform: none;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+}
+
+@keyframes fv-canvas-ping {
+  0%,
+  35% {
+    opacity: 0;
+    transform: none;
+  }
+
+  35.1% {
+    opacity: 0.7;
+    transform: none;
+  }
+
+  42% {
+    opacity: 0;
+    transform: scale(1.35, 1.9);
+  }
+
+  46.25% {
+    opacity: 0;
+    transform: none;
+  }
+
+  46.35% {
+    opacity: 0.7;
+    transform: none;
+  }
+
+  53.25%,
+  100% {
+    opacity: 0;
+    transform: scale(1.35, 1.9);
+  }
+}
+
+@keyframes fv-canvas-count {
+  0%,
+  45% {
+    transform: none;
+  }
+
+  48.75%,
+  95% {
+    transform: translateY(-100%);
+  }
+
+  95.1%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-canvas-bar {
+  0%,
+  51.25% {
+    opacity: 1;
+    transform: scaleY(0.3);
+  }
+
+  61.25%,
+  91.25% {
+    opacity: 1;
+    transform: none;
+  }
+
+  94.9% {
+    opacity: 0;
+    transform: none;
+  }
+
+  95% {
+    opacity: 0;
+    transform: scaleY(0.3);
+  }
+
+  98.75%,
+  100% {
+    opacity: 1;
+    transform: scaleY(0.3);
+  }
+}
+
+@keyframes fv-canvas-bar-red {
+  0%,
+  53.75% {
+    opacity: 1;
+  }
+
+  61.25%,
+  94.9% {
+    opacity: 0;
+  }
+
+  95%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-canvas-out-c {
+  0%,
+  61.25% {
+    opacity: 1;
+  }
+
+  63.75%,
+  93.75% {
+    opacity: 0;
+  }
+
+  97.5%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-canvas-in-c {
+  0%,
+  61.25% {
+    opacity: 0;
+  }
+
+  63.75%,
+  92.5% {
+    opacity: 1;
+  }
+
+  95%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-canvas *,
+  .fv-canvas *::after {
+    animation: none !important;
+  }
+}

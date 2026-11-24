@@ -16,6 +16,10 @@ Changes made in this fork:
 The changes are distributed under the same MIT License terms as set out in
 LICENSE.
 
+Third-party marks in apps/web/src/assets/competitors identify the products
+discussed in the website guides. The marks remain the property of their
+respective owners.
+
 docs/upstream-credits.md credits the original contributors of selected
 upstream changes that were integrated into this fork. This source preview retains the common public BB ancestry. The credits
 also identify later upstream work included in Omnyo.

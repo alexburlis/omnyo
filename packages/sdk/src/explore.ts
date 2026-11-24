@@ -86,6 +86,8 @@ const exploreSkillSchema = z
     revision: z.string().min(1).max(100),
     sha256: z.string().regex(/^[a-f0-9]{64}$/u),
     summary: z.string().min(1).max(1000).optional(),
+    setupUrl: z.url().max(2048).optional(),
+    packSlug: z.string().optional(),
     detailPath: z.string().min(1).max(200),
   })
   .superRefine((item, context) => {
@@ -139,6 +141,34 @@ const exploreSkillSchema = z
         message: "expected a pinned GitHub source or versioned Omnyo skill URL",
       });
     }
+
+    if (item.setupUrl !== undefined) {
+      const setup = new URL(item.setupUrl);
+
+      if (
+        item.source !== "github" ||
+        setup.origin !== "https://github.com" ||
+        setup.username !== "" ||
+        setup.password !== "" ||
+        setup.search !== "" ||
+        !setup.pathname.startsWith(`/${item.publisher}/blob/${item.revision}/`)
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["setupUrl"],
+          message: "expected a setup URL at the pinned GitHub revision",
+        });
+    }
+
+    if (
+      item.packSlug !== undefined &&
+      (item.source !== "omnyo" || item.packSlug !== item.slug)
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["packSlug"],
+        message: "expected the slug of the matching Omnyo skill pack",
+      });
   });
 
 const exploreSkillsSchema = z
@@ -862,7 +892,7 @@ export async function readExploreMarketplace(
   options: ExploreReadOptions = {},
 ): Promise<ExploreMarketplaceCatalog> {
   const text = await readExploreBody(
-    "/explore/marketplace.json",
+    "/explore/marketplace.json?provider-setup=1",
     "application/json",
     CATALOG_MAX_BYTES,
     options,

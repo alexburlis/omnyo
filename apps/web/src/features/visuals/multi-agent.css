@@ -1,0 +1,169 @@
+.fv-multi-agent {
+  background:
+    radial-gradient(
+      55% 50% at 20% 10%,
+      color-mix(in oklch, var(--fv-ok) 6%, transparent),
+      transparent
+    ),
+    var(--fv-chrome);
+}
+
+.fv-multi-agent-stage {
+  position: absolute;
+  top: max(1.8em, calc(100% - 23.2em));
+  left: calc(50% - 17.5em);
+  width: 35em;
+  height: 18em;
+}
+
+.fv-multi-agent-wires {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 35em;
+  height: 18em;
+  overflow: visible;
+  fill: none;
+}
+
+.fv-multi-agent-wires .is-tree {
+  stroke: var(--fv-hair);
+  stroke-width: 0.1;
+}
+
+.fv-multi-agent-wires .is-message {
+  stroke: var(--fv-ok);
+  stroke-width: 0.1;
+  stroke-dasharray: 0.35 0.3;
+  animation: fv-multi-agent-flow 1.6s linear infinite;
+}
+
+.fv-multi-agent-chat {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 0.9em;
+  height: 3.6em;
+  padding: 0 1.1em;
+  border-radius: 0.8em;
+  box-shadow: 0 1em 2em -1em var(--fv-shade);
+}
+
+.dark .fv-multi-agent-chat {
+  box-shadow: 0 1em 2em -1em rgb(0 0 0 / 0.6);
+}
+
+.fv-multi-agent-chat.is-parent {
+  top: 0;
+  left: 0;
+  width: 19.4em;
+  height: 4.2em;
+  background: var(--fv-select);
+  border-color: var(--fv-hair);
+}
+
+.fv-multi-agent-chat.is-child {
+  left: 3.4em;
+  width: 16em;
+}
+
+.fv-multi-agent-chat.is-review {
+  top: 6.7em;
+  border-color: color-mix(in oklch, var(--fv-ok) 45%, var(--fv-canvas));
+}
+
+.fv-multi-agent-chat.is-tests {
+  top: 11.7em;
+}
+
+.fv-multi-agent-chevron {
+  width: 1.1em;
+  height: 1.1em;
+  margin-left: auto;
+  fill: none;
+  stroke: var(--fv-soft);
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-multi-agent-name {
+  display: grid;
+  min-width: 0;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.fv-multi-agent-name span {
+  font-size: 0.8em;
+  color: var(--fv-dim);
+}
+
+.fv-multi-agent-chat .fv-dot {
+  width: 0.75em;
+  height: 0.75em;
+}
+
+.fv-multi-agent-glyph {
+  flex: none;
+  width: 0.95em;
+  height: 0.95em;
+  border: 0.16em solid color-mix(in oklch, var(--fv-ok) 30%, var(--fv-canvas));
+  border-top-color: var(--fv-ok);
+  border-radius: 50%;
+}
+
+.fv-multi-agent-bubble {
+  position: absolute;
+  top: 0;
+  left: 21em;
+  width: 14em;
+  padding: 0.8em 1em;
+  border: 1px solid color-mix(in oklch, var(--fv-ok) 40%, var(--fv-canvas));
+  border-radius: 1em 1em 1em 0.25em;
+  background: color-mix(in oklch, var(--fv-ok) 10%, var(--fv-canvas));
+  box-shadow: 0 1.2em 2.4em -1em var(--fv-shade);
+}
+
+.dark .fv-multi-agent-bubble {
+  box-shadow: 0 1.2em 2.4em -1em rgb(0 0 0 / 0.7);
+}
+
+.fv-multi-agent-from {
+  font-size: 0.74em;
+  color: var(--fv-soft);
+  white-space: nowrap;
+}
+
+.fv-multi-agent-text {
+  margin-top: 0.3em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.fv-multi-agent-text span {
+  white-space: nowrap;
+}
+
+.fv-multi-agent-note {
+  position: absolute;
+  top: 16.5em;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: 0.86em;
+  color: var(--fv-dim);
+}
+
+@keyframes fv-multi-agent-flow {
+  to {
+    stroke-dashoffset: -0.65;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-multi-agent-wires .is-message {
+    animation: none;
+  }
+}

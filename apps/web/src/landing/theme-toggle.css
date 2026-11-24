@@ -1,0 +1,106 @@
+@property --rim-r {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+:root.theme-reveal::view-transition-old(root),
+:root.theme-reveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+.theme-rim {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at var(--rim-x) var(--rim-y),
+    transparent calc(var(--rim-r) - 2.75px),
+    #ff4f17 calc(var(--rim-r) - 2px),
+    #ff4f17 var(--rim-r),
+    transparent var(--rim-r)
+  );
+}
+
+.theme-toggle {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 22%, transparent);
+  transition:
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.theme-toggle:hover {
+  background: color-mix(in oklab, currentColor 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 34%, transparent);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid #ff4f17;
+  outline-offset: 3px;
+}
+
+.theme-toggle-icon {
+  width: 19px;
+  height: 19px;
+  overflow: visible;
+}
+
+.theme-toggle-core {
+  fill: currentColor;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.theme-toggle-bite {
+  fill: #000;
+  transform: translate(11px, -11px);
+  transition: transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.theme-toggle-rays {
+  stroke: currentColor;
+  stroke-width: 1.7px;
+  stroke-linecap: round;
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+  transition:
+    transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.3s ease;
+}
+
+.dark .theme-toggle-core {
+  transform: scale(1.5);
+}
+
+.dark .theme-toggle-bite {
+  transform: translate(4.6px, -3.8px);
+}
+
+.dark .theme-toggle-rays {
+  opacity: 0;
+  transform: rotate(-60deg) scale(0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-toggle-core,
+  .theme-toggle-bite,
+  .theme-toggle-rays {
+    transition: none;
+  }
+}

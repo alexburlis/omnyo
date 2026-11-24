@@ -1,0 +1,846 @@
+.fv-plugins {
+  --fv-plugins-primary: var(--fv-ink);
+  --fv-plugins-on-primary: var(--fv-canvas);
+  --fv-plugins-muted: color-mix(in oklch, var(--fv-ink) 16%, var(--fv-canvas));
+  --fv-loop: 8s;
+  --fv-play: paused;
+}
+
+.dark .fv-plugins {
+  --fv-plugins-primary: oklch(0.82 0.008 267);
+  --fv-plugins-on-primary: oklch(0.2178 0.011 268);
+}
+
+.fv-plugins svg {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-plugins-page {
+  position: absolute;
+  inset: 0;
+}
+
+.fv-plugins .fv-plugins-title {
+  display: flex;
+  align-items: center;
+  height: 3.1em;
+  padding: 0 1.2em;
+  border-bottom: 1px solid var(--fv-seam);
+  font-weight: 600;
+}
+
+.fv-plugins-content {
+  padding: 1.1em 1.6em;
+}
+
+.fv-plugins .fv-plugins-intro {
+  color: var(--fv-soft);
+  font-size: 0.92em;
+  line-height: 1.45;
+}
+
+.fv-plugins-tools {
+  display: flex;
+  gap: 0.45em;
+  margin-top: 0.9em;
+  font-size: 0.88em;
+  white-space: nowrap;
+}
+
+.fv-plugins-tools > span {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  height: 2.5em;
+  padding: 0 0.75em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.5em;
+}
+
+.fv-plugins-tools .fv-plugins-search {
+  flex: 1;
+  min-width: 0;
+  color: var(--fv-soft);
+}
+
+.fv-plugins-filter svg {
+  width: 0.95em;
+  height: 0.95em;
+}
+
+.fv-plugins-tools .is-picked,
+.fv-plugins-tools .fv-plugins-search {
+  position: relative;
+}
+
+.fv-plugins-search .fv-plugins-outline {
+  opacity: 0;
+}
+
+.fv-plugins-tools .fv-plugins-new {
+  border-color: transparent;
+  background: var(--fv-plugins-primary);
+  color: var(--fv-plugins-on-primary);
+}
+
+.fv-plugins-outline {
+  position: absolute;
+  inset: 0;
+  border-radius: 0.5em;
+  outline: 0.16em solid var(--fv-plugins-primary);
+  outline-offset: 0.12em;
+  background: color-mix(in oklab, var(--fv-plugins-primary) 10%, transparent);
+}
+
+.fv-plugins-tools .fv-plugins-cross {
+  position: absolute;
+  right: 1.4em;
+  bottom: -0.95em;
+  width: 1.5em;
+  height: 1.5em;
+  color: var(--fv-ink);
+  stroke-width: 1.6;
+  filter: drop-shadow(0 0 0.12em rgb(0 0 0 / 0.9));
+}
+
+.fv-plugins .fv-plugins-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75em;
+  margin-top: 1em;
+}
+
+.fv-plugins-grid li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.9em 0.95em 0.8em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.8em;
+}
+
+.fv-plugins .fv-plugins-name {
+  display: flex;
+  align-items: center;
+  gap: 0.65em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fv-plugins-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2em;
+  height: 2em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.45em;
+  color: var(--fv-soft);
+}
+
+.fv-plugins .fv-plugins-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--fv-soft);
+  font-size: 0.9em;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.fv-plugins .fv-plugins-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding-top: 0.7em;
+  border-top: 1px solid var(--fv-hair);
+  color: var(--fv-soft);
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.fv-plugins-logo {
+  position: relative;
+  width: 1.55em;
+  height: 1.55em;
+  border-radius: 50%;
+  background: var(--fv-plugins-muted);
+}
+
+.fv-plugins-logo::before {
+  content: "";
+  position: absolute;
+  inset: 0.38em;
+  border: 0.17em solid var(--fv-ink);
+  border-radius: 50%;
+}
+
+.fv-plugins-logo::after {
+  content: "";
+  position: absolute;
+  top: 0.24em;
+  right: 0.26em;
+  width: 0.36em;
+  height: 0.36em;
+  border-radius: 50%;
+  background: var(--fv-accent);
+}
+
+.fv-plugins-switch {
+  position: relative;
+  width: 2.3em;
+  height: 1.3em;
+  margin-left: auto;
+  border-radius: 99em;
+  background: var(--fv-plugins-muted);
+}
+
+.fv-plugins-switch::after {
+  content: "";
+  position: absolute;
+  top: 0.18em;
+  left: 0.18em;
+  width: 0.94em;
+  height: 0.94em;
+  border-radius: 50%;
+  background: var(--fv-ink);
+}
+
+.fv-plugins-switch.is-on {
+  background: var(--fv-plugins-primary);
+}
+
+.fv-plugins-switch.is-on::after {
+  left: auto;
+  right: 0.18em;
+  background: var(--fv-plugins-on-primary);
+}
+
+.fv-plugins-switch.is-toggle {
+  isolation: isolate;
+  background: var(--fv-plugins-muted);
+}
+
+.fv-plugins-switch.is-toggle::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--fv-plugins-primary);
+}
+
+.fv-plugins-switch.is-toggle::after {
+  content: none;
+}
+
+.fv-plugins-switch.is-toggle i {
+  position: absolute;
+  top: 0.18em;
+  left: 0.18em;
+  width: 0.94em;
+  height: 0.94em;
+  border-radius: 50%;
+  background: var(--fv-ink);
+  transform: translateX(1em);
+}
+
+.fv-plugins-switch.is-toggle i::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--fv-plugins-on-primary);
+}
+
+.fv-plugins .fv-plugins-pointer {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  width: 1.75em;
+  height: 1.75em;
+  margin: -0.18em 0 0 -0.35em;
+  fill: oklch(0.99 0 0);
+  stroke: oklch(0.2 0.01 260);
+  stroke-width: 1.3;
+  filter: drop-shadow(0 0.15em 0.25em rgb(0 0 0 / 0.5));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fv-plugins-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--fv-shade);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dark .fv-plugins-scrim {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.fv-plugins-dialog {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(30em, 88%);
+  padding: 1.1em 1.2em 1.2em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.9em;
+  background: var(--fv-canvas);
+  box-shadow: 0 1.4em 3em -1em var(--fv-shade);
+  opacity: 0;
+  translate: -50% -50%;
+}
+
+.dark .fv-plugins-dialog {
+  box-shadow: 0 1.4em 3em -1em rgb(0 0 0 / 0.8);
+}
+
+.fv-plugins .fv-plugins-dialog-title {
+  font-size: 1.05em;
+  font-weight: 600;
+}
+
+.fv-plugins .fv-plugins-pick {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  margin-top: 0.8em;
+  padding: 0.3em 0.3em 0.3em 0.75em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.5em;
+  background: color-mix(in oklab, var(--fv-plugins-muted) 40%, transparent);
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.fv-plugins-pick svg {
+  color: var(--fv-soft);
+}
+
+.fv-plugins-pick code {
+  color: var(--fv-soft);
+  font-family: var(--fv-mono);
+  font-size: 0.82em;
+}
+
+.fv-plugins-pick span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fv-plugins-pick em {
+  padding: 0.3em 0.6em;
+  border-radius: 0.4em;
+  font-size: 0.92em;
+  font-style: normal;
+}
+
+.fv-plugins-ask {
+  margin-top: 0.7em;
+  padding: 0.75em 0.8em 0.5em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.9em;
+  background: var(--fv-raise);
+}
+
+.fv-plugins .fv-plugins-typed {
+  display: grid;
+  overflow: hidden;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.fv-plugins-typed > span {
+  grid-area: 1 / 1;
+}
+
+.fv-plugins-placeholder {
+  color: var(--fv-dim);
+  opacity: 0;
+}
+
+.fv-plugins-type {
+  position: relative;
+  justify-self: start;
+}
+
+.fv-plugins-cover {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(100% + 0.6em);
+  background: var(--fv-raise);
+  transform: translateX(100%);
+}
+
+.fv-plugins-cover b {
+  position: absolute;
+  top: 0.15em;
+  bottom: 0.15em;
+  left: 0.05em;
+  width: 1.5px;
+  background: var(--fv-ink);
+}
+
+.fv-plugins .fv-plugins-askbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.7em;
+  color: var(--fv-soft);
+}
+
+.fv-plugins-send {
+  display: grid;
+  place-items: center;
+  width: 1.9em;
+  height: 1.9em;
+  border-radius: 50%;
+  background: var(--fv-plugins-primary);
+  color: var(--fv-plugins-on-primary);
+}
+
+.fv-plugins-send svg {
+  width: 1em;
+  height: 1em;
+  stroke-width: 2.2;
+}
+
+.fv-plugins .fv-plugins-hint {
+  position: absolute;
+  bottom: 1.1em;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  padding: 0.3em 0.3em 0.3em 0.75em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.6em;
+  background: var(--fv-canvas);
+  box-shadow: 0 0.8em 1.8em -0.4em var(--fv-shade);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.dark .fv-plugins .fv-plugins-hint {
+  box-shadow: 0 0.8em 1.8em -0.4em rgb(0 0 0 / 0.75);
+}
+
+.fv-plugins-hint svg {
+  color: var(--fv-plugins-primary);
+}
+
+.fv-plugins-hint em {
+  padding: 0.35em 0.7em;
+  border-radius: 0.45em;
+  font-size: 0.92em;
+  font-style: normal;
+}
+
+.fv-box[data-live] .fv-plugins {
+  --fv-play: running;
+}
+
+.fv-plugins .fv-plugins-pointer {
+  animation: fv-plugins-pointer var(--fv-loop) cubic-bezier(0.45, 0, 0.2, 1)
+    infinite var(--fv-play);
+}
+
+.fv-plugins-switch.is-toggle::before,
+.fv-plugins-switch.is-toggle i::before {
+  animation: fv-plugins-on var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-plugins-switch.is-toggle i {
+  animation: fv-plugins-thumb var(--fv-loop) cubic-bezier(0.3, 0, 0.2, 1)
+    infinite var(--fv-play);
+}
+
+.fv-plugins .fv-plugins-hint {
+  animation: fv-plugins-hint var(--fv-loop) cubic-bezier(0.2, 0.8, 0.2, 1)
+    infinite var(--fv-play);
+}
+
+.fv-plugins-tools .fv-plugins-cross {
+  animation: fv-plugins-cross var(--fv-loop) cubic-bezier(0.45, 0, 0.2, 1)
+    infinite var(--fv-play);
+}
+
+.fv-plugins-search .fv-plugins-outline {
+  animation: fv-plugins-outline-a var(--fv-loop) linear infinite var(--fv-play);
+}
+
+.is-picked .fv-plugins-outline {
+  animation: fv-plugins-outline-b var(--fv-loop) linear infinite var(--fv-play);
+}
+
+.fv-plugins-scrim {
+  animation: fv-plugins-scrim var(--fv-loop) ease infinite var(--fv-play);
+}
+
+.fv-plugins-dialog {
+  animation: fv-plugins-dialog var(--fv-loop) cubic-bezier(0.2, 0.8, 0.2, 1)
+    infinite var(--fv-play);
+}
+
+.fv-plugins-placeholder {
+  animation: fv-plugins-placeholder var(--fv-loop) linear infinite
+    var(--fv-play);
+}
+
+.fv-plugins-cover {
+  animation: fv-plugins-type var(--fv-loop) linear infinite var(--fv-play);
+}
+
+.fv-plugins-cover b {
+  animation: fv-plugins-blink 1s steps(1) infinite var(--fv-play);
+}
+
+.fv-plugins-send {
+  animation: fv-plugins-send var(--fv-loop) ease infinite var(--fv-play);
+}
+
+@keyframes fv-plugins-pointer {
+  0%,
+  3.75% {
+    opacity: 0;
+    transform: translate(6em, 4.5em) scale(1);
+  }
+
+  7.5% {
+    opacity: 1;
+  }
+
+  16.25% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  17.5% {
+    transform: translate(0, 0) scale(0.84);
+  }
+
+  20% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  25% {
+    opacity: 1;
+    transform: translate(0.8em, 1.6em) scale(1);
+  }
+
+  30%,
+  100% {
+    opacity: 0;
+    transform: translate(1.2em, 2.4em) scale(1);
+  }
+}
+
+@keyframes fv-plugins-on {
+  0%,
+  17.5% {
+    opacity: 0;
+  }
+
+  21.25%,
+  92.5% {
+    opacity: 1;
+  }
+
+  96.25%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-plugins-thumb {
+  0%,
+  17.5% {
+    transform: none;
+  }
+
+  21.25%,
+  92.5% {
+    transform: translateX(1em);
+  }
+
+  96.25%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-plugins-hint {
+  0%,
+  30% {
+    opacity: 0;
+    transform: translate(-50%, 1em);
+  }
+
+  33.75%,
+  55% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  57.5%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0.5em);
+  }
+}
+
+@keyframes fv-plugins-cross {
+  0%,
+  35% {
+    opacity: 0;
+    transform: translate(-9em, 0.4em) scale(1);
+  }
+
+  37.5%,
+  40% {
+    opacity: 1;
+    transform: translate(-9em, 0.4em) scale(1);
+  }
+
+  47.5%,
+  52.5% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  53.75% {
+    transform: translate(0, 0) scale(0.78);
+  }
+
+  55% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  58.75%,
+  100% {
+    opacity: 0;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+@keyframes fv-plugins-cross-sm {
+  0%,
+  35% {
+    opacity: 0;
+    transform: translate(3em, 6em) scale(1);
+  }
+
+  37.5%,
+  40% {
+    opacity: 1;
+    transform: translate(3em, 6em) scale(1);
+  }
+
+  47.5%,
+  52.5% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  53.75% {
+    transform: translate(0, 0) scale(0.78);
+  }
+
+  55% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  58.75%,
+  100% {
+    opacity: 0;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+@keyframes fv-plugins-outline-a {
+  0%,
+  38.5% {
+    opacity: 0;
+  }
+
+  38.75%,
+  42.75% {
+    opacity: 1;
+  }
+
+  43%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-plugins-outline-b {
+  0%,
+  42.75% {
+    opacity: 0;
+  }
+
+  43%,
+  56.25% {
+    opacity: 1;
+  }
+
+  58.75%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-plugins-scrim {
+  0%,
+  55% {
+    opacity: 0;
+  }
+
+  58.75%,
+  88.75% {
+    opacity: 1;
+  }
+
+  92.5%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-plugins-dialog {
+  0%,
+  55% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  58.75%,
+  88.75% {
+    opacity: 1;
+    transform: none;
+  }
+
+  92.5%,
+  100% {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes fv-plugins-placeholder {
+  0%,
+  62.5% {
+    opacity: 1;
+  }
+
+  62.6%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-plugins-type {
+  0%,
+  62.5% {
+    transform: none;
+    animation-timing-function: steps(23, end);
+  }
+
+  77.5%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fv-plugins-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-plugins-send {
+  0%,
+  77.5% {
+    opacity: 0.5;
+  }
+
+  80%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-plugins *,
+  .fv-plugins *::before {
+    animation: none !important;
+  }
+
+  .fv-plugins-scrim,
+  .fv-plugins-dialog {
+    display: none;
+  }
+}
+
+@container (max-width: 200px) {
+  .fv-plugins-tools .fv-plugins-cross {
+    animation-name: fv-plugins-cross-sm;
+  }
+
+  .fv-plugins-dialog {
+    width: 92%;
+    padding: 0.8em 0.8em 0.9em;
+  }
+
+  .fv-plugins-pick em,
+  .fv-plugins .fv-plugins-askbar {
+    display: none;
+  }
+
+  .fv-plugins .fv-plugins-title,
+  .fv-plugins .fv-plugins-intro {
+    display: none;
+  }
+
+  .fv-plugins-content {
+    padding: 0.9em;
+  }
+
+  .fv-plugins-tools {
+    margin-top: 0;
+  }
+
+  .fv-plugins-tools .fv-plugins-filter:not(.is-picked),
+  .fv-plugins-tools .fv-plugins-search {
+    display: none;
+  }
+
+  .fv-plugins .fv-plugins-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fv-plugins .fv-plugins-hint {
+    bottom: 0.8em;
+    gap: 0.4em;
+    font-size: 0.9em;
+  }
+}

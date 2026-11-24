@@ -1,0 +1,393 @@
+.fv-storage-cleanup-processes {
+  --scp-loop: 9s;
+  --scp-shift: 8.5em;
+  --scp-attn-text: var(--fv-attn-text);
+
+  padding: 1.15em 2.2em;
+  overflow: hidden;
+}
+
+.dark .fv-storage-cleanup-processes {
+  --scp-attn-text: var(--fv-attn);
+}
+
+.fv-storage-cleanup-processes .fv-scp-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1em;
+  margin-bottom: 0.4em;
+}
+
+.fv-storage-cleanup-processes .fv-scp-head h3 {
+  font-size: 1.25em;
+  font-weight: 560;
+}
+
+.fv-storage-cleanup-processes .fv-scp-summary,
+.fv-storage-cleanup-processes .fv-scp-step {
+  display: inline-grid;
+}
+
+.fv-storage-cleanup-processes .fv-scp-summary > span,
+.fv-storage-cleanup-processes .fv-scp-step > span {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+  animation: var(--scp-loop) ease-in-out infinite both;
+}
+
+.fv-storage-cleanup-processes .fv-scp-summary {
+  font-size: 0.9em;
+}
+
+.fv-storage-cleanup-processes .fv-scp-summary .is-before {
+  animation-name: fv-scp-before;
+}
+
+.fv-storage-cleanup-processes .fv-scp-summary .is-after {
+  opacity: 0;
+  color: var(--fv-ok);
+  animation-name: fv-scp-after;
+}
+
+.fv-storage-cleanup-processes .fv-scp-machine {
+  margin-bottom: 0.5em;
+  font-size: 0.82em;
+  font-weight: 500;
+}
+
+.fv-storage-cleanup-processes .fv-scp-group {
+  height: var(--scp-shift);
+  margin-bottom: 0.3em;
+}
+
+.fv-storage-cleanup-processes .fv-scp-group.is-archived {
+  animation: fv-scp-gone var(--scp-loop) cubic-bezier(0.4, 0, 0.2, 1) infinite
+    both;
+}
+
+.fv-storage-cleanup-processes .fv-scp-rest .fv-scp-group {
+  height: auto;
+}
+
+.fv-storage-cleanup-processes .fv-scp-rest {
+  animation: fv-scp-rest var(--scp-loop) cubic-bezier(0.4, 0, 0.2, 1) infinite
+    both;
+}
+
+.fv-storage-cleanup-processes .fv-scp-chat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1em;
+  font-size: 0.92em;
+}
+
+.fv-storage-cleanup-processes .fv-scp-chat b {
+  font-weight: 560;
+}
+
+.fv-storage-cleanup-processes .fv-scp-chat .fv-dim {
+  font-size: 0.88em;
+}
+
+.fv-storage-cleanup-processes .fv-scp-group ul {
+  margin-left: 1em;
+}
+
+.fv-storage-cleanup-processes .fv-scp-row {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  padding: 0.5em 0;
+  border-top: 1px solid var(--fv-seam);
+}
+
+.fv-storage-cleanup-processes .fv-scp-row:first-child {
+  border-top: 0;
+}
+
+.fv-storage-cleanup-processes .fv-scp-copy {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.6em;
+  row-gap: 0.1em;
+  align-items: baseline;
+  min-width: 0;
+  flex: 1;
+  font-size: 0.88em;
+  white-space: nowrap;
+}
+
+.fv-storage-cleanup-processes .fv-scp-copy b {
+  font-weight: 560;
+}
+
+.fv-storage-cleanup-processes .fv-scp-copy .fv-mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fv-storage-cleanup-processes .fv-scp-facts {
+  grid-column: 1 / -1;
+  font-size: 0.9em;
+  color: var(--fv-dim);
+}
+
+.fv-storage-cleanup-processes .fv-scp-step .is-s1 {
+  animation-name: fv-scp-s1;
+}
+
+.fv-storage-cleanup-processes .fv-scp-step .is-s2 {
+  opacity: 0;
+  animation-name: fv-scp-s2;
+}
+
+.fv-storage-cleanup-processes .fv-scp-step .is-s3 {
+  opacity: 0;
+  color: var(--scp-attn-text);
+  animation-name: fv-scp-s3;
+}
+
+.fv-storage-cleanup-processes .fv-scp-actions {
+  display: flex;
+  gap: 0.3em;
+  font-size: 0.82em;
+}
+
+.fv-storage-cleanup-processes .fv-scp-actions span {
+  padding: 0.25em 0.7em;
+  border-radius: 0.4em;
+  color: var(--fv-soft);
+}
+
+.fv-storage-cleanup-processes .fv-scp-actions span:last-child {
+  background: var(--fv-select);
+  color: var(--fv-ink);
+}
+
+.fv-storage-cleanup-processes .fv-scp-stops {
+  margin-top: 0.5em;
+  font-size: 0.86em;
+  animation: fv-scp-block var(--scp-loop) ease-out infinite both;
+}
+
+@keyframes fv-scp-block {
+  0%,
+  58% {
+    opacity: 0;
+  }
+
+  64%,
+  93% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.fv-storage-cleanup-processes .fv-scp-stops > p {
+  margin-bottom: 0.3em;
+  font-weight: 500;
+}
+
+.fv-storage-cleanup-processes .fv-scp-stops li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  padding: 0.15em 0;
+  white-space: nowrap;
+  opacity: 0;
+  animation: fv-scp-stop var(--scp-loop) ease-out infinite both;
+}
+
+.fv-storage-cleanup-processes .fv-scp-stops li + li {
+  animation-name: fv-scp-stop-2;
+}
+
+.fv-storage-cleanup-processes .fv-scp-stops li.is-old {
+  opacity: 1;
+  animation: none;
+}
+
+@keyframes fv-scp-s1 {
+  0%,
+  28% {
+    opacity: 1;
+  }
+
+  31%,
+  96% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-scp-s2 {
+  0%,
+  28% {
+    opacity: 0;
+  }
+
+  31%,
+  44% {
+    opacity: 1;
+  }
+
+  47%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-scp-s3 {
+  0%,
+  44% {
+    opacity: 0;
+  }
+
+  47%,
+  96% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-scp-gone {
+  0%,
+  54% {
+    opacity: 1;
+    transform: none;
+  }
+
+  60%,
+  93% {
+    opacity: 0;
+    transform: translateX(-2em);
+  }
+
+  98%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-scp-rest {
+  0%,
+  58% {
+    transform: none;
+  }
+
+  66%,
+  93% {
+    transform: translateY(calc(var(--scp-shift) * -1 - 0.3em));
+  }
+
+  98%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-scp-before {
+  0%,
+  58% {
+    opacity: 1;
+  }
+
+  62%,
+  95% {
+    opacity: 0;
+  }
+
+  98%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-scp-after {
+  0%,
+  58% {
+    opacity: 0;
+  }
+
+  62%,
+  95% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-scp-stop {
+  0%,
+  66% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  71%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-scp-stop-2 {
+  0%,
+  70% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  75%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-storage-cleanup-processes *,
+  .fv-storage-cleanup-processes *::before,
+  .fv-storage-cleanup-processes *::after {
+    animation: none !important;
+  }
+
+  .fv-storage-cleanup-processes .fv-scp-stops {
+    display: none;
+  }
+}
+
+@container (max-width: 520px) {
+  .fv-storage-cleanup-processes {
+    padding: 1.1em 1.4em;
+  }
+
+  .fv-storage-cleanup-processes .fv-scp-actions span:first-child {
+    display: none;
+  }
+}

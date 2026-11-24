@@ -1,0 +1,75 @@
+.fv.fv-speed {
+  --sp-glow: 4%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9em;
+  padding: 1.3em 1.6em 1.1em;
+  background:
+    radial-gradient(
+      50% 55% at 15% 0,
+      color-mix(in oklch, var(--fv-accent) var(--sp-glow), transparent),
+      transparent
+    ),
+    var(--fv-chrome);
+}
+
+.dark .fv.fv-speed {
+  --sp-glow: 10%;
+}
+
+.fv-speed .fv-speed-grid {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 0.8em;
+  min-height: 0;
+}
+
+.fv-speed .fv-speed-grid li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+  padding: 0.8em 1.1em 0.85em;
+  background: var(--fv-canvas);
+}
+
+.fv-speed .fv-speed-where {
+  position: absolute;
+  top: 0.8em;
+  right: 0.8em;
+  font-size: 0.72em;
+  color: var(--fv-soft);
+}
+
+.fv-speed .fv-speed-value {
+  font-size: 2.8em;
+  font-weight: 640;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-speed .fv-speed-value small {
+  margin-left: 0.18em;
+  font-size: 0.42em;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--fv-accent-text);
+}
+
+.fv-speed .fv-speed-caption {
+  margin-top: 0.4em;
+  font-size: 0.88em;
+  line-height: 1.3;
+  color: var(--fv-soft);
+  text-wrap: balance;
+}
+
+.fv-speed .fv-speed-note {
+  font-size: 0.74em;
+  color: var(--fv-dim);
+}

@@ -1,0 +1,806 @@
+.fv.fv-keyboard {
+  --k-subtle: color-mix(in oklch, var(--fv-ink) 55%, var(--fv-canvas));
+  --k-hover: color-mix(in oklab, var(--fv-ink) 13.8%, transparent);
+  --k-border: color-mix(in oklch, var(--fv-ink) 19.4%, var(--fv-canvas));
+  --k-ok: var(--fv-ok);
+  --k-loop: 8s;
+  --k-label: 2.024em;
+  --k-row: 2.45em;
+  --k-side-row: 2.45em;
+  --k-list: 13.4em;
+
+  font-size: max(7px, 3.95cqw);
+  background: var(--fv-chrome);
+}
+
+.dark .fv.fv-keyboard {
+  --k-subtle: oklch(0.68 0.008 267);
+  --k-ok: oklch(0.77 0.15 158);
+}
+
+.fv-keyboard .fv-keys-app {
+  position: absolute;
+  inset: 0;
+}
+
+.fv-keyboard .fv-keys-side {
+  position: absolute;
+  top: 0.6em;
+  bottom: 0;
+  left: 0.6em;
+  width: 15em;
+  overflow: hidden;
+  padding: 0.9em 0.6em;
+  border: 1px solid var(--fv-seam);
+  border-bottom: 0;
+  border-radius: 0.95em 0 0;
+  background: var(--fv-side);
+  white-space: nowrap;
+}
+
+.fv-keyboard .fv-keys-side p {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.5em 0.55em;
+  border-radius: 0.6em;
+  color: var(--fv-soft);
+}
+
+.fv-keyboard .fv-keys-side p.is-on {
+  background: var(--fv-select);
+  color: var(--fv-ink);
+}
+
+.fv-keyboard .fv-keys-side p.is-next::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--fv-select);
+  opacity: 0;
+}
+
+.fv-keyboard .fv-keys-side p > * {
+  position: relative;
+}
+
+.fv-keyboard .fv-keys-side span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fv-keyboard .fv-keys-side i {
+  flex: none;
+  width: 1.05em;
+  height: 1.05em;
+  border-radius: 0.3em;
+  background: var(--fv-select);
+}
+
+.fv-keyboard .fv-keys-side .fv-keys-new {
+  margin-bottom: 0.6em;
+  color: var(--fv-ink);
+}
+
+.fv-keyboard .fv-keys-main {
+  position: absolute;
+  top: 0.6em;
+  bottom: 0;
+  left: 15.6em;
+  right: 0.6em;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 1.2em;
+  padding: 0 2em 1.2em;
+  border: 1px solid var(--fv-seam);
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0 0.95em 0 0;
+  background: var(--fv-canvas);
+  color: var(--fv-soft);
+  line-height: 1.6;
+}
+
+.fv-keyboard .fv-keys-composer {
+  height: 4.6em;
+  padding: 0.9em 1.1em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 1.1em;
+  background: var(--fv-raise);
+  color: var(--k-subtle);
+}
+
+.fv-keyboard .fv-keys-toast {
+  position: absolute;
+  right: 0.9em;
+  bottom: 0.9em;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  max-width: calc(100% - 1.8em);
+  padding: 0.6em 0.75em;
+  border: 1px solid var(--k-border);
+  border-radius: 0.8em;
+  background: var(--fv-raise);
+  box-shadow: 0 0.8em 1.6em -0.6em var(--fv-shade);
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.dark .fv-keyboard .fv-keys-toast {
+  box-shadow: 0 0.8em 1.6em -0.6em rgb(0 0 0 / 0.6);
+}
+
+.fv-keyboard .fv-keys-toast svg {
+  flex: none;
+  width: 1.15em;
+  height: 1.15em;
+  fill: none;
+  stroke: var(--k-ok);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-keyboard .fv-keys-toast span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.fv-keyboard .fv-keys-toast b {
+  font-size: 0.92em;
+}
+
+.fv-keyboard .fv-keys-toast small {
+  overflow: hidden;
+  font-size: 0.85em;
+  color: var(--fv-soft);
+  text-overflow: ellipsis;
+}
+
+.fv-keyboard .fv-keys-toast em {
+  flex: none;
+  margin-left: 0.4em;
+  padding: 0.3em 0.6em;
+  border: 1px solid var(--k-border);
+  border-radius: 0.5em;
+  font-size: 0.85em;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.fv-keyboard .fv-keys-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--fv-shade);
+}
+
+.dark .fv-keyboard .fv-keys-scrim {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.fv-keyboard .fv-keys-palette {
+  position: absolute;
+  top: 0.9em;
+  left: 0.9em;
+  right: 0.9em;
+  overflow: hidden;
+  border: 1px solid var(--k-border);
+  border-radius: 0.92em;
+  background: var(--fv-canvas);
+  box-shadow:
+    0 0.8em 1.2em -0.3em var(--fv-shade),
+    0 0.3em 0.5em -0.3em var(--fv-shade);
+  transform-origin: 50% 0;
+}
+
+.dark .fv-keyboard .fv-keys-palette {
+  box-shadow:
+    0 0.8em 1.2em -0.3em rgb(0 0 0 / 0.35),
+    0 0.3em 0.5em -0.3em rgb(0 0 0 / 0.3);
+}
+
+.fv-keyboard .fv-keys-input {
+  display: flex;
+  align-items: center;
+  height: 3.2em;
+  padding: 0 0.95em;
+  border-bottom: 1px solid var(--k-border);
+  white-space: nowrap;
+}
+
+.fv-keyboard .fv-keys-letter {
+  flex: none;
+  max-width: 0;
+  overflow: hidden;
+}
+
+.fv-keyboard .fv-keys-placeholder {
+  font-weight: 300;
+  color: var(--k-subtle);
+  opacity: 0.7;
+}
+
+.fv-keyboard .fv-keys-caret {
+  flex: none;
+  width: 1px;
+  height: 1.2em;
+  margin: 0 0.15em 0 0.05em;
+  background: var(--fv-ink);
+}
+
+.fv-keyboard .fv-keys-list {
+  position: relative;
+  height: var(--k-list);
+  overflow: hidden;
+  padding: 0.3em;
+}
+
+.fv-keyboard .fv-keys-list::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2.4em;
+  background: linear-gradient(transparent, var(--fv-canvas));
+  pointer-events: none;
+}
+
+.fv-keyboard .fv-keys-label {
+  padding: 0.3em 0.6em;
+  font-size: 0.92em;
+  line-height: 1.6;
+  color: var(--k-subtle);
+}
+
+.fv-keyboard .fv-keys-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.9em;
+  min-height: var(--k-row);
+  padding: 0.35em 0.6em;
+  border-radius: 0.45em;
+  white-space: nowrap;
+}
+
+.fv-keyboard .fv-keys-row::before,
+.fv-keyboard .fv-keys-row::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--k-hover);
+  opacity: 0;
+}
+
+.fv-keyboard .fv-keys-row::after {
+  background: color-mix(in oklab, var(--fv-ink) 10%, transparent);
+}
+
+.fv-keyboard .fv-keys-row.is-on::before {
+  opacity: 1;
+}
+
+.fv-keyboard .fv-keys-row > * {
+  position: relative;
+}
+
+.fv-keyboard .fv-keys-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fv-keyboard .fv-keys-row b {
+  font-weight: 400;
+}
+
+.fv-keyboard .fv-keys-row kbd {
+  flex: none;
+  margin-left: auto;
+  padding: 0.32em 0.45em;
+  border-radius: 0.3em;
+  background: color-mix(in oklab, var(--fv-ink) 7%, transparent);
+  font-family: inherit;
+  font-size: 0.88em;
+  line-height: 1;
+  color: var(--k-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.fv-keyboard .fv-keys-caret,
+.fv-keyboard .fv-keys-letter,
+.fv-keyboard .fv-keys-placeholder,
+.fv-keyboard .fv-keys-label,
+.fv-keyboard .fv-keys-row,
+.fv-keyboard .fv-keys-row b,
+.fv-keyboard .fv-keys-row.is-on::before,
+.fv-keyboard .fv-keys-row.is-top::before,
+.fv-keyboard .fv-keys-row.is-top::after,
+.fv-keyboard .fv-keys-palette,
+.fv-keyboard .fv-keys-scrim,
+.fv-keyboard .fv-keys-side p:is(.is-gone, .is-next, .is-below),
+.fv-keyboard .fv-keys-side p.is-next::before,
+.fv-keyboard .fv-keys-toast,
+.fv-keyboard .fv-keys-list,
+.fv-keyboard .fv-keys-list::after {
+  animation: var(--k-loop) var(--fv-swap) infinite both;
+}
+
+.fv-keyboard .fv-keys-list {
+  animation-name: fv-keys-results;
+}
+
+.fv-keyboard .fv-keys-list::after {
+  animation-name: fv-keys-more;
+}
+
+@keyframes fv-keys-results {
+  0%,
+  12.5% {
+    height: var(--k-list);
+  }
+
+  13.6%,
+  16% {
+    height: calc(var(--k-row) * 3 + 0.6em);
+  }
+
+  17.1%,
+  62% {
+    height: calc(var(--k-row) * 2 + 0.6em);
+  }
+
+  62.1%,
+  100% {
+    height: var(--k-list);
+  }
+}
+
+@keyframes fv-keys-more {
+  0%,
+  12.5% {
+    opacity: 1;
+  }
+
+  13.6%,
+  62% {
+    opacity: 0;
+  }
+
+  62.1%,
+  100% {
+    opacity: 1;
+  }
+}
+
+.fv-keyboard .fv-keys-caret {
+  animation: fv-keys-blink 1.1s steps(1) infinite;
+}
+
+.fv-keyboard :is(.fv-keys-letter, .fv-keys-row b) {
+  animation-timing-function: linear;
+}
+
+.fv-keyboard .fv-keys-letter {
+  animation-name: fv-keys-type;
+}
+
+.fv-keyboard .fv-keys-row b {
+  animation-name: fv-keys-match;
+}
+
+.fv-keyboard :is(.fv-keys-input, .fv-keys-row) .is-q1 {
+  animation-delay: 0.28s;
+}
+
+.fv-keyboard :is(.fv-keys-input, .fv-keys-row) .is-q2 {
+  animation-delay: 0.56s;
+}
+
+.fv-keyboard :is(.fv-keys-input, .fv-keys-row) .is-q3 {
+  animation-delay: 0.84s;
+}
+
+.fv-keyboard :is(.fv-keys-placeholder, .fv-keys-label) {
+  animation-name: fv-keys-query;
+}
+
+.fv-keyboard .fv-keys-row.is-ar {
+  animation-name: fv-keys-drop-ar;
+}
+
+.fv-keyboard .fv-keys-row.is-arc {
+  animation-name: fv-keys-drop-arc;
+}
+
+.fv-keyboard .fv-keys-row.is-kept {
+  animation-name: fv-keys-kept;
+}
+
+.fv-keyboard .fv-keys-row.is-top {
+  animation-name: fv-keys-top;
+}
+
+.fv-keyboard .fv-keys-row.is-on::before {
+  animation-name: fv-keys-first-off;
+}
+
+.fv-keyboard .fv-keys-row.is-top::before {
+  animation-name: fv-keys-top-on;
+}
+
+.fv-keyboard .fv-keys-row.is-top::after {
+  animation-name: fv-keys-enter;
+}
+
+.fv-keyboard .fv-keys-palette {
+  animation-name: fv-keys-palette;
+}
+
+.fv-keyboard .fv-keys-scrim {
+  animation-name: fv-keys-scrim;
+}
+
+.fv-keyboard .fv-keys-side p.is-gone {
+  animation-name: fv-keys-archived;
+}
+
+.fv-keyboard .fv-keys-side p:is(.is-next, .is-below) {
+  animation-name: fv-keys-close-gap;
+}
+
+.fv-keyboard .fv-keys-side p.is-next::before {
+  animation-name: fv-keys-select-next;
+}
+
+.fv-keyboard .fv-keys-toast {
+  animation-name: fv-keys-toast;
+}
+
+@keyframes fv-keys-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-keys-type {
+  0%,
+  9% {
+    max-width: 0;
+  }
+
+  9.6%,
+  62% {
+    max-width: 1em;
+  }
+
+  62.1%,
+  100% {
+    max-width: 0;
+  }
+}
+
+@keyframes fv-keys-match {
+  0%,
+  9% {
+    font-weight: 400;
+    color: inherit;
+  }
+
+  9.6%,
+  62% {
+    font-weight: 650;
+    color: var(--fv-ink);
+  }
+
+  62.1%,
+  100% {
+    font-weight: 400;
+    color: inherit;
+  }
+}
+
+@keyframes fv-keys-query {
+  0%,
+  9% {
+    opacity: 1;
+  }
+
+  9.6%,
+  62% {
+    opacity: 0;
+  }
+
+  62.1%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-keys-drop-ar {
+  0%,
+  9% {
+    opacity: 1;
+    transform: none;
+  }
+
+  10.5%,
+  12.5% {
+    opacity: 1;
+    transform: translateY(calc(var(--k-label) * -1));
+  }
+
+  13.6%,
+  62% {
+    opacity: 0;
+    transform: translateY(calc(var(--k-label) * -1));
+  }
+
+  62.1%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-keys-drop-arc {
+  0%,
+  9% {
+    opacity: 1;
+    transform: none;
+  }
+
+  10.5%,
+  16% {
+    opacity: 1;
+    transform: translateY(calc(var(--k-label) * -1));
+  }
+
+  17.1%,
+  62% {
+    opacity: 0;
+    transform: translateY(calc(var(--k-label) * -1));
+  }
+
+  62.1%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-keys-kept {
+  0%,
+  9% {
+    transform: none;
+  }
+
+  10.5%,
+  62% {
+    transform: translateY(calc(var(--k-label) * -1));
+  }
+
+  62.1%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-keys-top {
+  0%,
+  9% {
+    transform: none;
+  }
+
+  10.5%,
+  12.5% {
+    transform: translateY(calc(var(--k-label) * -1));
+  }
+
+  14.5%,
+  62% {
+    transform: translateY(calc((var(--k-label) + var(--k-row) * 3) * -1));
+  }
+
+  62.1%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-keys-first-off {
+  0%,
+  12.5% {
+    opacity: 1;
+  }
+
+  13.2%,
+  62% {
+    opacity: 0;
+  }
+
+  62.1%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-keys-top-on {
+  0%,
+  12.5% {
+    opacity: 0;
+  }
+
+  13.2%,
+  62% {
+    opacity: 1;
+  }
+
+  62.1%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-keys-enter {
+  0%,
+  32% {
+    opacity: 0;
+  }
+
+  33.5% {
+    opacity: 1;
+  }
+
+  36%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-keys-palette {
+  0%,
+  34.5% {
+    opacity: 1;
+    transform: none;
+  }
+
+  38.5%,
+  80% {
+    opacity: 0;
+    transform: translateY(-0.3em) scale(0.98);
+  }
+
+  85%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-keys-scrim {
+  0%,
+  34.5% {
+    opacity: 1;
+  }
+
+  38.5%,
+  80% {
+    opacity: 0;
+  }
+
+  85%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-keys-archived {
+  0%,
+  40% {
+    opacity: 1;
+    transform: none;
+  }
+
+  45%,
+  87% {
+    opacity: 0;
+    transform: translateX(-1.2em);
+  }
+
+  95%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-keys-close-gap {
+  0%,
+  44% {
+    transform: none;
+  }
+
+  51%,
+  87% {
+    transform: translateY(calc(var(--k-side-row) * -1));
+  }
+
+  95%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-keys-select-next {
+  0%,
+  45% {
+    opacity: 0;
+  }
+
+  50%,
+  87% {
+    opacity: 1;
+  }
+
+  93%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-keys-toast {
+  0%,
+  44% {
+    opacity: 0;
+    transform: translateY(0.8em);
+  }
+
+  49%,
+  73% {
+    opacity: 1;
+    transform: none;
+  }
+
+  78%,
+  100% {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-keyboard *,
+  .fv-keyboard *::before,
+  .fv-keyboard *::after {
+    animation: none !important;
+  }
+}
+
+@container (min-width: 560px) {
+  .fv.fv-keyboard {
+    font-size: 2.15cqw;
+  }
+
+  .fv-keyboard .fv-keys-palette {
+    --k-list: 21em;
+
+    top: 3.4em;
+    left: calc(50% - 13em);
+    right: auto;
+    width: 30em;
+  }
+
+  .fv-keyboard .fv-keys-toast {
+    right: 1.6em;
+    bottom: 1.4em;
+    max-width: 22em;
+  }
+}

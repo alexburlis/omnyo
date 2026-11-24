@@ -1,0 +1,263 @@
+.fv-voice-dictionary {
+  --vd-loop: 9s;
+
+  display: flex;
+  background: var(--fv-chrome);
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-nav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 0.2em;
+  width: 10em;
+  padding: 1.6em 0.8em;
+  border-right: 1px solid var(--fv-seam);
+  color: var(--fv-soft);
+  font-size: 0.92em;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-nav span {
+  padding: 0.35em 0.7em;
+  border-radius: 0.5em;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-nav .is-on {
+  background: var(--fv-select);
+  color: var(--fv-ink);
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.9em;
+  min-width: 0;
+  padding: 1.6em 2em;
+  background: var(--fv-canvas);
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-main h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 0.9em 1em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.8em;
+  background: var(--fv-raise);
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-card > b {
+  font-weight: 600;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-model {
+  display: grid;
+  min-height: 3.2em;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-model > * {
+  grid-area: 1 / 1;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5em;
+  color: var(--fv-dim);
+  font-size: 0.88em;
+  opacity: 0;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-button {
+  padding: 0.35em 0.9em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.5em;
+  opacity: 0.6;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-ready {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  align-self: start;
+  color: var(--fv-soft);
+  font-size: 0.88em;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-ready svg {
+  flex: none;
+  width: 1.2em;
+  height: 1.2em;
+  fill: none;
+  stroke: var(--fv-ok);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-hint {
+  color: var(--fv-dim);
+  font-size: 0.84em;
+}
+
+.fv-voice-dictionary .fv-voice-dictionary-words {
+  display: flex;
+  flex-direction: column;
+  min-height: 6.6em;
+  padding: 0.5em 0.8em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.55em;
+  background: var(--fv-chrome);
+  font-family: var(--fv-mono);
+  font-size: 0.9em;
+  line-height: 1.6;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-voice-dictionary .fv-voice-dictionary-loading {
+    animation: fv-voice-dictionary-loading var(--vd-loop) linear infinite;
+  }
+
+  .fv-voice-dictionary .fv-voice-dictionary-ready {
+    animation: fv-voice-dictionary-ready var(--vd-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-voice-dictionary .fv-voice-dictionary-words li {
+    animation: fv-voice-dictionary-word-1 var(--vd-loop) var(--fv-swap) infinite;
+  }
+
+  .fv-voice-dictionary .fv-voice-dictionary-words .is-word-2 {
+    animation-name: fv-voice-dictionary-word-2;
+  }
+
+  .fv-voice-dictionary .fv-voice-dictionary-words .is-word-3 {
+    animation-name: fv-voice-dictionary-word-3;
+  }
+
+  .fv-voice-dictionary .fv-voice-dictionary-words .is-word-4 {
+    animation-name: fv-voice-dictionary-word-4;
+  }
+}
+
+@keyframes fv-voice-dictionary-loading {
+  0%,
+  26% {
+    opacity: 1;
+  }
+
+  29%,
+  96% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-voice-dictionary-ready {
+  0%,
+  27% {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  31%,
+  94% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fv-voice-dictionary-word-1 {
+  0%,
+  38% {
+    opacity: 0;
+    transform: translateX(-0.4em);
+  }
+
+  42%,
+  94% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fv-voice-dictionary-word-2 {
+  0%,
+  50% {
+    opacity: 0;
+    transform: translateX(-0.4em);
+  }
+
+  54%,
+  94% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fv-voice-dictionary-word-3 {
+  0%,
+  62% {
+    opacity: 0;
+    transform: translateX(-0.4em);
+  }
+
+  66%,
+  94% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fv-voice-dictionary-word-4 {
+  0%,
+  74% {
+    opacity: 0;
+    transform: translateX(-0.4em);
+  }
+
+  78%,
+  94% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+}

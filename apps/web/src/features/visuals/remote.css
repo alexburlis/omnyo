@@ -1,0 +1,182 @@
+.fv-remote {
+  --rm-glow: color-mix(in oklab, var(--fv-accent) 3%, transparent);
+  --rm-lift: color-mix(in oklab, var(--fv-ink) 24%, transparent);
+  background:
+    radial-gradient(40% 60% at 62% 35%, var(--rm-glow), transparent),
+    var(--fv-chrome);
+}
+
+.dark .fv-remote {
+  --rm-glow: rgb(255 200 150 / 0.07);
+  --rm-lift: rgb(0 0 0 / 0.8);
+}
+
+.fv-remote-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.fv-remote-links path {
+  fill: none;
+  stroke: var(--fv-hair);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.fv-remote-links path.is-live {
+  stroke: color-mix(in oklch, var(--fv-accent) 60%, var(--fv-canvas));
+  stroke-dasharray: 4 4;
+  animation: fv-remote-flow 1.6s linear infinite;
+}
+
+@keyframes fv-remote-flow {
+  to {
+    stroke-dashoffset: -8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-remote-links path.is-live {
+    animation: none;
+  }
+}
+
+.fv-remote-server {
+  position: absolute;
+  top: 38%;
+  left: 19%;
+  width: 10em;
+  padding: 0.8em 1em;
+  transform: translate(-50%, -100%);
+  background: var(--fv-canvas);
+  font-size: 0.95em;
+}
+
+.fv-remote-host {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-weight: 600;
+}
+
+.fv-remote-connect {
+  position: absolute;
+  top: 70%;
+  left: 19%;
+  gap: 0.6em;
+  padding: 0.5em 1em;
+  transform: translate(-50%, -50%);
+  border: 1px solid color-mix(in oklch, var(--fv-accent) 45%, var(--fv-seam));
+  background: var(--fv-canvas);
+  font-size: 0.95em;
+  font-weight: 600;
+}
+
+.fv-remote-globe {
+  width: 1em;
+  height: 1em;
+  border: 1px solid var(--fv-accent);
+  border-radius: 50%;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 45%,
+      var(--fv-accent) 45% 55%,
+      transparent 55%
+    ),
+    linear-gradient(transparent 45%, var(--fv-accent) 45% 55%, transparent 55%);
+}
+
+.fv-remote-phone {
+  position: absolute;
+  top: 1.6em;
+  left: 44%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  width: 15em;
+  height: 31em;
+  padding: 1.7em 1.1em 1em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 2.2em;
+  background: var(--fv-canvas);
+  box-shadow:
+    0 0 0 0.35em var(--fv-raise),
+    0 2em 4em -1.5em var(--rm-lift);
+}
+
+.fv-remote-notch {
+  position: absolute;
+  top: 0.6em;
+  left: 50%;
+  width: 4em;
+  height: 0.6em;
+  border-radius: 99em;
+  background: var(--fv-raise);
+  transform: translateX(-50%);
+}
+
+.fv-remote-title {
+  font-size: 1.3em;
+  font-weight: 650;
+}
+
+.fv-remote-phone .fv-eyebrow {
+  margin-top: 0.3em;
+}
+
+.fv-remote-ask {
+  display: grid;
+  gap: 0.55em;
+  padding: 0.85em 0.9em;
+  border-color: color-mix(in oklch, var(--fv-attn) 40%, var(--fv-seam));
+}
+
+.fv-remote-chat,
+.fv-remote-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  white-space: nowrap;
+}
+
+.fv-remote-chat {
+  font-weight: 600;
+}
+
+.fv-remote-question {
+  color: var(--fv-soft);
+  font-size: 0.9em;
+  line-height: 1.35;
+}
+
+.fv-remote-answers {
+  display: flex;
+  gap: 0.45em;
+}
+
+.fv-remote-answers span {
+  flex: 1;
+  padding: 0.4em 0;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.55em;
+  font-family: var(--fv-mono);
+  font-size: 0.78em;
+  text-align: center;
+}
+
+.fv-remote-answers span.is-primary {
+  border-color: transparent;
+  background: var(--fv-ink);
+  color: var(--fv-canvas);
+}
+
+.fv-remote-row {
+  padding: 0.5em 0.6em;
+  border-radius: 0.6em;
+  background: var(--fv-raise);
+  color: var(--fv-soft);
+  font-size: 0.9em;
+}

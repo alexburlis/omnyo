@@ -1,0 +1,406 @@
+.fv.fv-glance-phases {
+  --gp-loop: 9s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-glance-phases .fv-gp-chat {
+  position: absolute;
+  top: 1.1em;
+  left: 2.2em;
+  right: 2.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  font-size: 0.86em;
+  color: var(--fv-dim);
+}
+
+.fv-glance-phases .fv-gp-chat .is-you {
+  align-self: flex-end;
+  padding: 0.3em 0.85em;
+  border-radius: 1em;
+  background: var(--fv-select);
+  color: var(--fv-ink);
+}
+
+.fv-glance-phases .fv-gp-chat .is-say {
+  color: var(--fv-soft);
+}
+
+.fv-glance-phases .fv-gp-card {
+  position: absolute;
+  left: 1.4em;
+  right: 1.4em;
+  bottom: 1.1em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.85em 1em 0.9em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 1em;
+  background: var(--fv-canvas);
+  box-shadow: 0 1.4em 2.6em -1.2em var(--fv-shade);
+}
+
+.fv-glance-phases .fv-gp-top {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+}
+
+.fv-glance-phases .fv-gp-title {
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.fv-glance-phases .fv-gp-chip {
+  display: grid;
+}
+
+.fv-glance-phases .fv-gp-chip > span {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.12em 0.6em;
+  border-radius: 99em;
+  font-size: 0.72em;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.fv-glance-phases .fv-gp-chip .is-work {
+  background: color-mix(in oklab, var(--fv-info) 16%, transparent);
+  color: var(--fv-info);
+  opacity: 0;
+}
+
+.fv-glance-phases .fv-gp-chip .is-done {
+  background: color-mix(in oklab, var(--fv-ok) 16%, transparent);
+  color: var(--fv-ok);
+}
+
+.fv-glance-phases .fv-gp-chip i {
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.fv-glance-phases .fv-gp-lane {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  margin-left: auto;
+  font-size: 0.72em;
+  color: var(--fv-dim);
+}
+
+.fv-glance-phases .fv-gp-bars {
+  display: flex;
+  gap: 0.2em;
+}
+
+.fv-glance-phases .fv-gp-bars i {
+  position: relative;
+  width: 1.1em;
+  height: 0.32em;
+  border-radius: 99em;
+  background: var(--fv-hair);
+}
+
+.fv-glance-phases .fv-gp-bars i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--fv-info);
+}
+
+.fv-glance-phases .fv-gp-names {
+  display: grid;
+  min-width: 4.6em;
+}
+
+.fv-glance-phases .fv-gp-names > span {
+  grid-area: 1 / 1;
+  opacity: 0;
+}
+
+.fv-glance-phases .fv-gp-names > .is-ship {
+  opacity: 1;
+}
+
+.fv-glance-phases dl {
+  display: grid;
+  grid-template-columns: 3.4em 1fr;
+  gap: 0.35em 0.8em;
+  font-size: 0.86em;
+}
+
+.fv-glance-phases dt {
+  color: var(--fv-dim);
+}
+
+.fv-glance-phases dd {
+  display: grid;
+  min-width: 0;
+}
+
+.fv-glance-phases dd > span {
+  grid-area: 1 / 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-glance-phases dd > :not(.is-4, .is-static) {
+  opacity: 0;
+}
+
+.fv-glance-phases dd .is-ready {
+  justify-self: start;
+  padding: 0 0.6em;
+  border: 1px solid color-mix(in oklch, var(--fv-ok) 45%, var(--fv-seam));
+  border-radius: 0.45em;
+  color: var(--fv-ok);
+}
+
+.fv-glance-phases
+  :where(.fv-gp-chip > span, .fv-gp-names > span, dd > span:not(.is-static)) {
+  animation: var(--gp-loop) var(--fv-swap) infinite both;
+}
+
+.fv-glance-phases .fv-gp-bars i::after {
+  animation: var(--gp-loop) var(--fv-swap) infinite both;
+}
+
+.fv-glance-phases .fv-gp-chip .is-work {
+  animation-name: fv-gp-work;
+}
+
+.fv-glance-phases .fv-gp-chip .is-done {
+  animation-name: fv-gp-done;
+}
+
+.fv-glance-phases .is-1 {
+  animation-name: fv-gp-s1;
+}
+
+.fv-glance-phases .is-2 {
+  animation-name: fv-gp-s2;
+}
+
+.fv-glance-phases .is-3 {
+  animation-name: fv-gp-s3;
+}
+
+.fv-glance-phases .is-4 {
+  animation-name: fv-gp-s4;
+}
+
+.fv-glance-phases .fv-gp-bars i:nth-child(3)::after {
+  animation-name: fv-gp-bar3;
+}
+
+.fv-glance-phases .fv-gp-bars i:nth-child(4)::after {
+  animation-name: fv-gp-bar4;
+}
+
+.fv-glance-phases .fv-gp-bars i:nth-child(-n + 2)::after {
+  animation: none;
+}
+
+.fv-glance-phases .fv-gp-lane {
+  opacity: 0;
+  animation: fv-gp-lane var(--gp-loop) var(--fv-swap) infinite both;
+}
+
+@keyframes fv-gp-lane {
+  0%,
+  72% {
+    opacity: 1;
+  }
+
+  75%,
+  97% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-gp-s1 {
+  0%,
+  24% {
+    opacity: 1;
+    transform: none;
+  }
+
+  27%,
+  100% {
+    opacity: 0;
+    transform: translateY(-0.4em);
+  }
+}
+
+@keyframes fv-gp-s2 {
+  0%,
+  25% {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  28%,
+  49% {
+    opacity: 1;
+    transform: none;
+  }
+
+  52%,
+  100% {
+    opacity: 0;
+    transform: translateY(-0.4em);
+  }
+}
+
+@keyframes fv-gp-s3 {
+  0%,
+  50% {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  53%,
+  71% {
+    opacity: 1;
+    transform: none;
+  }
+
+  74%,
+  100% {
+    opacity: 0;
+    transform: translateY(-0.4em);
+  }
+}
+
+@keyframes fv-gp-s4 {
+  0%,
+  72% {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  75%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gp-work {
+  0%,
+  72% {
+    opacity: 1;
+  }
+
+  75%,
+  97% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-gp-done {
+  0%,
+  72% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+
+  75%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gp-bar2 {
+  0%,
+  25% {
+    opacity: 0;
+  }
+
+  28%,
+  95% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-gp-bar3 {
+  0%,
+  25% {
+    opacity: 0;
+  }
+
+  28%,
+  95% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-gp-bar4 {
+  0%,
+  50% {
+    opacity: 0;
+  }
+
+  53%,
+  95% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-glance-phases *,
+  .fv-glance-phases *::before,
+  .fv-glance-phases *::after {
+    animation: none !important;
+  }
+}
+
+.dark .fv-glance-phases {
+  --fv-shade: rgb(0 0 0 / 0.75);
+}

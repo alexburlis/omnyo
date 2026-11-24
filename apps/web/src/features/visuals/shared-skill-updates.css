@@ -1,0 +1,62 @@
+.fv-skill-watch {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 2.5em 3em;
+}
+
+.fv-skill-source {
+  display: grid;
+  align-self: center;
+  gap: 0.25em;
+  padding: 0.8em 1.5em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.7em;
+  background: var(--fv-raise);
+  text-align: center;
+}
+
+.fv-skill-source strong,
+.fv-skill-branches b {
+  font-family: var(--fv-mono);
+}
+
+.fv-skill-branches {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1em;
+  padding-top: 2em;
+  text-align: center;
+}
+
+.fv-skill-branches::before,
+.fv-skill-branches::after {
+  position: absolute;
+  content: "";
+}
+
+.fv-skill-branches::before {
+  inset: 0 auto auto 50%;
+  height: 1em;
+  border-left: 1px solid var(--fv-hair);
+}
+
+.fv-skill-branches::after {
+  inset: 1em calc(25% - 0.25em) auto;
+  height: 1em;
+  border: 1px solid var(--fv-hair);
+  border-bottom: 0;
+}
+
+.fv-skill-branches li {
+  display: grid;
+  gap: 0.25em;
+  padding: 0.7em;
+  border-radius: 0.6em;
+  background: var(--fv-side);
+}
+
+.fv-skill-branches span {
+  color: var(--fv-ok);
+}

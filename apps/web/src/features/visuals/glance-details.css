@@ -1,0 +1,247 @@
+.fv.fv-glance-details {
+  --gd-loop: 8s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-glance-details .fv-gd-card {
+  position: absolute;
+  inset: 0.9em 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  padding: 0.85em 1em;
+  overflow: hidden;
+  border: 1px solid var(--fv-seam);
+  border-radius: 1em;
+  background: var(--fv-canvas);
+}
+
+.fv-glance-details .fv-gd-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: 0.86em;
+}
+
+.fv-glance-details .fv-gd-head b {
+  font-weight: 600;
+}
+
+.fv-glance-details .fv-gd-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.1em 0.6em;
+  border-radius: 99em;
+  background: color-mix(in oklab, var(--fv-ok) 16%, transparent);
+  font-size: 0.82em;
+  color: var(--fv-ok);
+}
+
+.fv-glance-details .fv-gd-done i {
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.fv-glance-details .fv-gd-result {
+  font-size: 0.86em;
+  color: var(--fv-soft);
+}
+
+.fv-glance-details .fv-gd-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding-top: 0.45em;
+  border-top: 1px solid var(--fv-seam);
+  font-size: 0.8em;
+}
+
+.fv-glance-details .fv-gd-toggle svg {
+  width: 0.9em;
+  height: 0.9em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.fv-glance-details .fv-gd-toggle b {
+  font-weight: 560;
+}
+
+.fv-glance-details .fv-gd-toggle span {
+  color: var(--fv-dim);
+}
+
+.fv-glance-details .fv-gd-eyebrow {
+  font-size: 0.64em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fv-dim);
+}
+
+.fv-glance-details .fv-gd-files {
+  display: flex;
+  gap: 0.4em;
+}
+
+.fv-glance-details .fv-gd-files span {
+  padding: 0.15em 0.55em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.45em;
+  font-family: var(--fv-mono);
+  font-size: 0.68em;
+  color: var(--fv-soft);
+}
+
+.fv-glance-details .fv-gd-proof {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+}
+
+.fv-glance-details .fv-gd-row {
+  padding: 0.35em 0.6em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.5em;
+  font-size: 0.76em;
+}
+
+.fv-glance-details .fv-gd-row em {
+  display: inline-block;
+  min-width: 6.4em;
+  font-size: 0.86em;
+  font-style: normal;
+  color: var(--fv-dim);
+}
+
+.fv-glance-details .fv-gd-row.is-rep em {
+  color: var(--fv-ok);
+}
+
+.fv-glance-details .fv-gd-row.is-hyp em {
+  color: var(--fv-attn-text);
+}
+
+.fv-glance-details .fv-gd-open {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+  margin-top: 0.4em;
+}
+
+.fv-glance-details .fv-gd-open small {
+  font-size: 0.86em;
+  color: var(--fv-dim);
+}
+
+.fv-glance-details .fv-gd-open pre {
+  margin: 0;
+  padding: 0.4em 0.6em;
+  border-radius: 0.4em;
+  background: var(--fv-raise);
+  font-family: var(--fv-mono);
+  font-size: 0.86em;
+  line-height: 1.55;
+  white-space: pre;
+  color: var(--fv-soft);
+}
+
+.fv-glance-details .fv-gd-open pre b {
+  font-weight: 400;
+  color: var(--fv-ok);
+}
+
+.fv-glance-details :where(.fv-gd-toggle svg, .fv-gd-reveal, .fv-gd-open) {
+  animation: var(--gd-loop) var(--fv-swap) infinite both;
+}
+
+.fv-glance-details .fv-gd-toggle svg {
+  animation-name: fv-gd-chevron;
+}
+
+.fv-glance-details .fv-gd-reveal {
+  animation-name: fv-gd-reveal;
+}
+
+.fv-glance-details .fv-gd-reveal + .fv-gd-reveal {
+  animation-delay: 0.15s;
+}
+
+.fv-glance-details .fv-gd-open {
+  animation-name: fv-gd-open;
+}
+
+@keyframes fv-gd-chevron {
+  0%,
+  10% {
+    transform: none;
+  }
+
+  14%,
+  94% {
+    transform: rotate(90deg);
+  }
+
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-gd-reveal {
+  0%,
+  12% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  19%,
+  93% {
+    opacity: 1;
+    transform: none;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gd-open {
+  0%,
+  38% {
+    opacity: 0;
+    transform: translateY(-0.4em);
+  }
+
+  45%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-glance-details *,
+  .fv-glance-details *::before,
+  .fv-glance-details *::after {
+    animation: none !important;
+  }
+
+  .fv-glance-details .fv-gd-toggle svg {
+    transform: rotate(90deg);
+  }
+}

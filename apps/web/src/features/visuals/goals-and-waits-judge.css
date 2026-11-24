@@ -1,0 +1,503 @@
+.fv.fv-goals-and-waits-judge {
+  --gj-loop: 10s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-goals-and-waits-judge .fv-gj-chat {
+  position: absolute;
+  top: 0.9em;
+  left: 0.9em;
+  bottom: 0.9em;
+  width: 18.6em;
+  overflow: hidden;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.9em;
+  background: var(--fv-canvas);
+}
+
+.fv-goals-and-waits-judge .fv-gj-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 2.4em;
+  padding: 0 0.8em;
+  border-bottom: 1px solid var(--fv-seam);
+  white-space: nowrap;
+}
+
+.fv-goals-and-waits-judge .fv-gj-bar > b {
+  font-size: 0.84em;
+  font-weight: 600;
+}
+
+.fv-goals-and-waits-judge .fv-gj-pill {
+  display: grid;
+  margin-left: auto;
+}
+
+.fv-goals-and-waits-judge .fv-gj-pill > span {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  justify-self: end;
+  padding: 0.12em 0.6em;
+  border-radius: 0.5em;
+  background: var(--fv-raise);
+  font-size: 0.72em;
+  white-space: nowrap;
+}
+
+.fv-goals-and-waits-judge .fv-gj-pill svg {
+  width: 1.05em;
+  height: 1.05em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+.fv-goals-and-waits-judge .fv-gj-pill .is-met {
+  background: color-mix(in oklab, var(--fv-ok) 18%, transparent);
+  color: var(--fv-ok);
+}
+
+.fv-goals-and-waits-judge .fv-gj-pill > :not(.is-met) {
+  opacity: 0;
+}
+
+.fv-goals-and-waits-judge .fv-gj-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45em;
+  padding: 0.8em 0.9em;
+  font-size: 0.86em;
+}
+
+.fv-goals-and-waits-judge .fv-gj-say {
+  color: var(--fv-soft);
+}
+
+.fv-goals-and-waits-judge .fv-gj-end {
+  font-size: 0.88em;
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-judge .fv-gj-nudge {
+  padding: 0.4em 0.6em;
+  border-left: 0.2em solid var(--fv-attn);
+  border-radius: 0.3em;
+  background: var(--fv-raise);
+}
+
+.fv-goals-and-waits-judge .fv-gj-nudge small {
+  display: block;
+  font-size: 0.86em;
+  color: var(--fv-attn-text);
+}
+
+.fv-goals-and-waits-judge .fv-gj-judge {
+  position: absolute;
+  top: 0.9em;
+  left: 20.4em;
+  right: 0.9em;
+  bottom: 0.9em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 0.75em 0.8em;
+  border: 1px dashed var(--fv-hair);
+  border-radius: 0.9em;
+}
+
+.fv-goals-and-waits-judge .fv-gj-judge h4 {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.84em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.fv-goals-and-waits-judge .fv-gj-judge h4 small {
+  font-size: 0.8em;
+  font-weight: 400;
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-judge .fv-gj-check {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  padding: 0.45em 0.6em;
+  border-radius: 0.6em;
+  background: var(--fv-raise);
+  font-size: 0.8em;
+}
+
+.fv-goals-and-waits-judge .fv-gj-budget {
+  margin-top: auto;
+  font-size: 0.72em;
+  line-height: 1.4;
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-judge .fv-gj-check small {
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-judge .fv-gj-verdict {
+  display: grid;
+}
+
+.fv-goals-and-waits-judge .fv-gj-verdict > span {
+  grid-area: 1 / 1;
+  font-family: var(--fv-mono);
+  font-size: 0.92em;
+}
+
+.fv-goals-and-waits-judge .fv-gj-verdict .is-spin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-family: inherit;
+  color: var(--fv-dim);
+}
+
+.fv-goals-and-waits-judge .fv-gj-verdict .is-spin i {
+  width: 0.85em;
+  height: 0.85em;
+  border: 0.14em solid var(--fv-hair);
+  border-top-color: var(--fv-info);
+  border-radius: 50%;
+  animation: fv-gj-turn 1s linear infinite;
+}
+
+.fv-goals-and-waits-judge .fv-gj-verdict .is-unmet {
+  color: var(--fv-attn-text);
+}
+
+.fv-goals-and-waits-judge .fv-gj-verdict .is-met {
+  color: var(--fv-ok);
+}
+
+.fv-goals-and-waits-judge .fv-gj-verdict .is-spin {
+  opacity: 0;
+}
+
+.fv-goals-and-waits-judge
+  :where(
+    .fv-gj-pill > span,
+    .fv-gj-reveal,
+    .fv-gj-check,
+    .fv-gj-verdict > span
+  ) {
+  animation: var(--gj-loop) var(--fv-swap) infinite both;
+}
+
+.fv-goals-and-waits-judge .fv-gj-verdict .is-spin {
+  animation-name: fv-gj-spin-a;
+}
+
+.fv-goals-and-waits-judge .is-c2 .fv-gj-verdict .is-spin {
+  animation-name: fv-gj-spin-b;
+}
+
+.fv-goals-and-waits-judge .fv-gj-verdict .is-unmet {
+  animation-name: fv-gj-unmet;
+}
+
+.fv-goals-and-waits-judge .fv-gj-verdict .is-met {
+  animation-name: fv-gj-met;
+}
+
+.fv-goals-and-waits-judge .fv-gj-check.is-c1 {
+  animation-name: fv-gj-c1;
+}
+
+.fv-goals-and-waits-judge .fv-gj-check.is-c2 {
+  animation-name: fv-gj-c2;
+}
+
+.fv-goals-and-waits-judge .fv-gj-reveal.is-r1 {
+  animation-name: fv-gj-r1;
+}
+
+.fv-goals-and-waits-judge .fv-gj-reveal.is-r2 {
+  animation-name: fv-gj-r2;
+}
+
+.fv-goals-and-waits-judge .fv-gj-reveal.is-r3 {
+  animation-name: fv-gj-r3;
+}
+
+.fv-goals-and-waits-judge .fv-gj-reveal.is-r4 {
+  animation-name: fv-gj-r4;
+}
+
+.fv-goals-and-waits-judge .fv-gj-pill .is-3 {
+  animation-name: fv-gj-p3;
+}
+
+.fv-goals-and-waits-judge .fv-gj-pill .is-4 {
+  animation-name: fv-gj-p4;
+}
+
+.fv-goals-and-waits-judge .fv-gj-pill .is-met {
+  animation-name: fv-gj-pmet;
+}
+
+@keyframes fv-gj-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes fv-gj-c1 {
+  0%,
+  8% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  12%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gj-spin-a {
+  0%,
+  10% {
+    opacity: 0;
+  }
+
+  12%,
+  22% {
+    opacity: 1;
+  }
+
+  24%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-gj-unmet {
+  0%,
+  23% {
+    opacity: 0;
+  }
+
+  25%,
+  94% {
+    opacity: 1;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-gj-c2 {
+  0%,
+  56% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  60%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gj-spin-b {
+  0%,
+  58% {
+    opacity: 0;
+  }
+
+  60%,
+  69% {
+    opacity: 1;
+  }
+
+  71%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-gj-met {
+  0%,
+  70% {
+    opacity: 0;
+  }
+
+  72%,
+  94% {
+    opacity: 1;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-gj-r1 {
+  0%,
+  2% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  6%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gj-r2 {
+  0%,
+  28% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  33%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gj-r3 {
+  0%,
+  42% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  47%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gj-r4 {
+  0%,
+  50% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  54%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gj-p3 {
+  0%,
+  30% {
+    opacity: 1;
+  }
+
+  33%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-gj-p4 {
+  0%,
+  30% {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+
+  33%,
+  72% {
+    opacity: 1;
+    transform: none;
+  }
+
+  75%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gj-pmet {
+  0%,
+  72% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+
+  76%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+
+  99%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-goals-and-waits-judge *,
+  .fv-goals-and-waits-judge *::before,
+  .fv-goals-and-waits-judge *::after {
+    animation: none !important;
+  }
+}

@@ -1,0 +1,339 @@
+.fv.fv-glance-changed {
+  --gc-loop: 8s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-glance-changed .fv-gc-card {
+  position: absolute;
+  top: 0.9em;
+  left: 1.4em;
+  right: 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.85em 1em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 1em;
+  background: var(--fv-canvas);
+}
+
+.fv-glance-changed .fv-gc-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: 0.86em;
+}
+
+.fv-glance-changed .fv-gc-head b {
+  font-weight: 600;
+}
+
+.fv-glance-changed .fv-gc-fresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  margin-left: auto;
+  font-size: 0.82em;
+  color: var(--fv-dim);
+}
+
+.fv-glance-changed .fv-gc-fresh i {
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: var(--fv-info);
+}
+
+.fv-glance-changed .fv-gc-since {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  padding: 0.6em 0.75em;
+  border-radius: 0.65em;
+  background: color-mix(in oklab, var(--fv-info) 8%, var(--fv-raise));
+}
+
+.fv-glance-changed .fv-gc-eyebrow {
+  font-size: 0.64em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fv-info);
+}
+
+.fv-glance-changed .fv-gc-change {
+  display: grid;
+  grid-template-columns: 3.6em 1fr;
+  gap: 0.6em;
+  font-size: 0.8em;
+}
+
+.fv-glance-changed .fv-gc-change dt {
+  color: var(--fv-dim);
+}
+
+.fv-glance-changed .fv-gc-change dd s {
+  color: var(--fv-dim);
+  text-decoration-color: var(--fv-hair);
+}
+
+.fv-glance-changed .fv-gc-change dd b {
+  font-weight: 500;
+}
+
+.fv-glance-changed .fv-gc-change dd b.is-ok {
+  color: var(--fv-ok);
+}
+
+.fv-glance-changed .fv-gc-ready {
+  position: absolute;
+  left: 1.4em;
+  right: 1.4em;
+  bottom: 0.9em;
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.65em 0.9em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 1em;
+  background: var(--fv-raise);
+  font-size: 0.86em;
+}
+
+.fv-glance-changed .fv-gc-ready svg {
+  width: 1.3em;
+  height: 1.3em;
+  fill: none;
+  stroke: var(--fv-ok);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-glance-changed .fv-gc-ready > span:first-of-type {
+  flex: 1;
+}
+
+.fv-glance-changed .fv-gc-btn {
+  padding: 0.25em 0.9em;
+  border-radius: 0.5em;
+  background: var(--fv-ink);
+  color: var(--fv-canvas);
+  font-weight: 600;
+}
+
+.fv-glance-changed .fv-gc-keep {
+  color: var(--fv-dim);
+}
+
+.fv-glance-changed .fv-gc-toast {
+  position: absolute;
+  left: 1.4em;
+  right: 1.4em;
+  bottom: 0.9em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65em 0.9em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 1em;
+  background: var(--fv-select);
+  font-size: 0.86em;
+  opacity: 0;
+}
+
+.fv-glance-changed .fv-gc-toast em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--fv-info);
+}
+
+.fv-glance-changed .fv-gc-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1.3em;
+  height: 1.6em;
+  fill: var(--fv-ink);
+  stroke: var(--fv-canvas);
+  stroke-width: 1.2;
+  opacity: 0;
+  filter: drop-shadow(0 0.15em 0.25em rgb(0 0 0 / 0.6));
+}
+
+.fv-glance-changed
+  :where(
+    .fv-gc-since,
+    .fv-gc-change,
+    .fv-gc-ready,
+    .fv-gc-btn,
+    .fv-gc-toast,
+    .fv-gc-cursor,
+    .fv-gc-card
+  ) {
+  animation: var(--gc-loop) var(--fv-swap) infinite both;
+}
+
+.fv-glance-changed .fv-gc-since {
+  animation-name: fv-gc-since;
+}
+
+.fv-glance-changed .fv-gc-change {
+  animation-name: fv-gc-change;
+}
+
+.fv-glance-changed .fv-gc-change + .fv-gc-change {
+  animation-delay: 0.2s;
+}
+
+.fv-glance-changed .fv-gc-ready {
+  animation-name: fv-gc-ready;
+}
+
+.fv-glance-changed .fv-gc-btn {
+  animation-name: fv-gc-press;
+}
+
+.fv-glance-changed .fv-gc-toast {
+  animation-name: fv-gc-toast;
+}
+
+.fv-glance-changed .fv-gc-cursor {
+  animation-name: fv-gc-cursor;
+  animation-timing-function: ease-in-out;
+}
+
+.fv-glance-changed .fv-gc-card {
+  animation-name: fv-gc-card;
+}
+
+@keyframes fv-gc-since {
+  0%,
+  6% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  12%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-gc-change {
+  0%,
+  12% {
+    opacity: 0;
+  }
+
+  18%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes fv-gc-cursor {
+  0%,
+  30% {
+    opacity: 0;
+    transform: translate(18em, 13em);
+  }
+
+  34% {
+    opacity: 1;
+  }
+
+  46%,
+  52% {
+    opacity: 1;
+    transform: translate(27.4em, 18.2em);
+  }
+
+  57%,
+  100% {
+    opacity: 0;
+    transform: translate(27.4em, 18.2em);
+  }
+}
+
+@keyframes fv-gc-press {
+  0%,
+  49% {
+    transform: none;
+  }
+
+  51% {
+    transform: scale(0.92);
+  }
+
+  54%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-gc-ready {
+  0%,
+  53% {
+    opacity: 1;
+    transform: none;
+  }
+
+  58%,
+  95% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-gc-toast {
+  0%,
+  55% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  60%,
+  92% {
+    opacity: 1;
+    transform: none;
+  }
+
+  97%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-gc-card {
+  0%,
+  55% {
+    opacity: 1;
+  }
+
+  62%,
+  94% {
+    opacity: 0.35;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-glance-changed *,
+  .fv-glance-changed *::before,
+  .fv-glance-changed *::after {
+    animation: none !important;
+  }
+}

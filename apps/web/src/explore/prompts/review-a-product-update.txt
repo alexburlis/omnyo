@@ -1,0 +1,22 @@
+Review the product update below before it goes out.
+
+Product: {{product name}}
+Readers: {{who will read this update}}
+Channel: {{changelog, email, blog post or in-app note}}
+
+Facts I can confirm:
+{{release notes, ticket summaries or other facts, one per line}}
+
+Draft update:
+{{the draft update}}
+
+Work through the draft in this order:
+
+1. Accuracy. Compare every claim with the facts above. Quote each claim the facts do not support. Do not fill gaps with assumptions.
+2. Reader impact. For each change, check that the draft says what changed, who it affects and what the reader needs to do, if anything.
+3. Missing information. Name anything a reader needs to act that the draft leaves out, such as availability, plan or version limits, or migration steps. Only list what the facts mention or what the reader cannot act without.
+4. Clarity. Point out jargon, vague phrases and sentences that bury the main change.
+
+Then rewrite the update. Keep my structure and voice, fix the problems you found and add nothing the facts do not support. Mark any sentence you could not verify with [check].
+
+Reply with three sections: Findings, Questions for me, Revised update.

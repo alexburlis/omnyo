@@ -1,0 +1,339 @@
+.fv.fv-codex-gui-handoff {
+  --xh-loop: 8s;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-canvas);
+}
+
+.fv-codex-gui-handoff .fv-xh-track {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  width: 200%;
+  transform: translateX(-50%);
+}
+
+.fv-codex-gui-handoff .fv-xh-pane {
+  position: relative;
+  flex: none;
+  width: 50%;
+  height: 100%;
+  background: var(--fv-canvas);
+}
+
+.fv-codex-gui-handoff .fv-xh-pane.is-next {
+  border-left: 1px solid var(--fv-seam);
+}
+
+.fv-codex-gui-handoff .fv-xh-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 2.7em;
+  padding: 0 1.2em;
+  border-bottom: 1px solid var(--fv-seam);
+  background: var(--fv-chrome);
+  white-space: nowrap;
+}
+
+.fv-codex-gui-handoff .fv-xh-bar b {
+  font-size: 0.92em;
+  font-weight: 600;
+}
+
+.fv-codex-gui-handoff .fv-xh-bar small {
+  font-size: 0.74em;
+  color: var(--fv-dim);
+}
+
+.fv-codex-gui-handoff .fv-xh-mark {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: var(--fv-ink);
+  stroke-width: 1.1;
+}
+
+.fv-codex-gui-handoff .fv-xh-mark.is-claude {
+  stroke: oklch(0.72 0.13 45);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.fv-codex-gui-handoff .fv-xh-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 1.3em 2.2em 0;
+  font-size: 0.92em;
+}
+
+.fv-codex-gui-handoff .fv-xh-say {
+  color: var(--fv-soft);
+}
+
+.fv-codex-gui-handoff .fv-xh-tools {
+  font-size: 0.86em;
+}
+
+.fv-codex-gui-handoff .fv-xh-composer {
+  position: absolute;
+  left: 1.2em;
+  right: 1.2em;
+  bottom: 0.9em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.75em 0.85em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 1em;
+  background: var(--fv-raise);
+  font-size: 0.92em;
+}
+
+.fv-codex-gui-handoff .fv-xh-favs {
+  display: flex;
+  gap: 0.5em;
+}
+
+.fv-codex-gui-handoff .fv-xh-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.25em 0.7em;
+  border: 1px solid var(--fv-seam);
+  border-radius: 0.55em;
+  font-size: 0.84em;
+  white-space: nowrap;
+}
+
+.fv-codex-gui-handoff .fv-xh-chip i {
+  font-style: normal;
+  color: var(--fv-soft);
+}
+
+.fv-codex-gui-handoff .fv-xh-chip.is-on {
+  border-color: transparent;
+  background: var(--fv-select);
+}
+
+.fv-codex-gui-handoff .fv-xh-chip em {
+  padding: 0 0.45em;
+  border-radius: 0.35em;
+  background: color-mix(in oklab, var(--fv-info) 20%, transparent);
+  font-size: 0.82em;
+  font-style: normal;
+  color: var(--fv-info);
+}
+
+.fv-codex-gui-handoff .fv-xh-chip.is-new::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--fv-info);
+  border-radius: inherit;
+  opacity: 0;
+}
+
+.fv-codex-gui-handoff .fv-xh-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1.3em;
+  height: 1.6em;
+  fill: var(--fv-ink);
+  stroke: var(--fv-canvas);
+  stroke-width: 1.2;
+  opacity: 0;
+  filter: drop-shadow(0 0.15em 0.25em rgb(0 0 0 / 0.6));
+}
+
+.fv-codex-gui-handoff .fv-xh-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding-bottom: 0.5em;
+  border-bottom: 1px solid var(--fv-seam);
+  font-size: 0.84em;
+  white-space: nowrap;
+}
+
+.fv-codex-gui-handoff .fv-xh-banner svg {
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: var(--fv-soft);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-codex-gui-handoff .fv-xh-banner u {
+  text-decoration-color: var(--fv-hair);
+  text-underline-offset: 0.2em;
+}
+
+.fv-codex-gui-handoff
+  :where(
+    .fv-xh-track,
+    .fv-xh-cursor,
+    .fv-xh-chip.is-new,
+    .is-in,
+    .fv-xh-banner
+  ),
+.fv-codex-gui-handoff .fv-xh-chip.is-new::after {
+  animation: var(--xh-loop) var(--fv-swap) infinite both;
+}
+
+.fv-codex-gui-handoff .fv-xh-track {
+  animation-name: fv-xh-track;
+}
+
+.fv-codex-gui-handoff .fv-xh-cursor {
+  animation-name: fv-xh-cursor;
+  animation-timing-function: ease-in-out;
+}
+
+.fv-codex-gui-handoff .fv-xh-chip.is-new {
+  animation-name: fv-xh-press;
+}
+
+.fv-codex-gui-handoff .fv-xh-chip.is-new::after {
+  animation-name: fv-xh-ring;
+}
+
+.fv-codex-gui-handoff .fv-xh-banner {
+  animation-name: fv-xh-banner;
+}
+
+.fv-codex-gui-handoff .is-in {
+  animation-name: fv-xh-in;
+}
+
+.fv-codex-gui-handoff .fv-xh-tools.is-in {
+  animation-delay: 0.3s;
+}
+
+@keyframes fv-xh-track {
+  0%,
+  38% {
+    opacity: 1;
+    transform: none;
+  }
+
+  48%,
+  92% {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+
+  95% {
+    opacity: 0;
+    transform: translateX(-50%);
+  }
+
+  96% {
+    opacity: 0;
+    transform: none;
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-xh-cursor {
+  0%,
+  6% {
+    opacity: 0;
+    transform: translate(24em, 13em);
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  24%,
+  31% {
+    opacity: 1;
+    transform: translate(14.6em, 17.8em);
+  }
+
+  36%,
+  100% {
+    opacity: 0;
+    transform: translate(14.6em, 17.8em);
+  }
+}
+
+@keyframes fv-xh-press {
+  0%,
+  27% {
+    transform: none;
+  }
+
+  30% {
+    transform: scale(0.94);
+  }
+
+  33%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-xh-ring {
+  0%,
+  20% {
+    opacity: 0;
+  }
+
+  24%,
+  40% {
+    opacity: 1;
+  }
+
+  46%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-xh-banner {
+  0%,
+  46% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  52%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-xh-in {
+  0%,
+  54% {
+    opacity: 0;
+    transform: translateY(0.5em);
+  }
+
+  62%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-codex-gui-handoff *,
+  .fv-codex-gui-handoff *::before,
+  .fv-codex-gui-handoff *::after {
+    animation: none !important;
+  }
+}

@@ -1,0 +1,78 @@
+.gh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 50px;
+  padding: 0 22px 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-family: var(--sans, inherit);
+  font-size: 15.5px;
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 24%, transparent);
+  transition:
+    background 0.25s var(--ease, ease),
+    box-shadow 0.25s var(--ease, ease),
+    transform 0.25s var(--ease, ease);
+}
+
+.gh-btn:hover {
+  background: color-mix(in oklab, currentColor 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 48%, transparent);
+  transform: translateY(-1px);
+}
+
+.gh-btn:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 3px;
+}
+
+.gh-glyph {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.gh-btn--icon {
+  width: 50px;
+  padding: 0;
+}
+
+.gh-btn-short {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .gh-btn {
+    padding: 0 20px 0 16px;
+  }
+
+  .gh-btn--icon {
+    padding: 0;
+  }
+
+  .gh-btn-long {
+    display: none;
+  }
+
+  .gh-btn-short {
+    display: inline;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gh-btn {
+    transition: none;
+  }
+
+  .gh-btn:hover {
+    transform: none;
+  }
+}

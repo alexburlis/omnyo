@@ -1,0 +1,21 @@
+{
+  "extends": ["@omnyo/tsconfig/base.json"],
+  "compilerOptions": {
+    "rootDir": "../..",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"],
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noUnusedLocals": false,
+    "resolveJsonModule": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@omnyo/plugin-sdk/app": ["./src/plugin-guide/plugin-sdk-app.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

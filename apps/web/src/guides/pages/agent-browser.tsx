@@ -1,0 +1,173 @@
+import { BrowserConcept } from "../concepts";
+import { PromptBlock, Ui } from "../guide-blocks";
+import { skillOffer, withIntake } from "../prompt-intake";
+import type { Guide } from "../guide-types";
+import {
+  annotateStep,
+  BROWSER_FAQ,
+  BROWSER_TROUBLESHOOTING,
+  PLUGINS_STEP,
+  SIGN_INS_STEP,
+} from "../shared/browser";
+import { meta } from "./agent-browser.meta";
+
+const AGENT_PROMPT = withIntake(
+  [
+    { label: "App URL", hint: "e.g. http://localhost:3000" },
+    { label: "Flow to check", hint: "the change to click through" },
+    { label: "Screen sizes", hint: "e.g. desktop and phone" },
+    { label: "Needs a sign-in", hint: "yes or no" },
+  ],
+  `Use a real browser to check my app, click through the change, and show me screenshots.
+
+Do every step below, with a Check after each step. Stop if a check fails and tell me what failed. Don't commit, push, or deploy unless I ask.
+
+1. Check browser access. Run omnyo plugin list. Browser Automation and Agent Annotations come with Omnyo and are on by default; if either is off, enable it with omnyo plugin enable browser-automation or omnyo plugin enable agent-annotations. Then read omnyo guide browser and omnyo browser-automation --help. Find this thread's machine with omnyo status --json and omnyo machine list.
+   Check: both plugins are running and the chosen browser machine is connected.
+
+2. Open the app.
+   2a. If the App URL needs a dev server, start it with the project's documented command in an Omnyo terminal in this environment, and check that the URL responds.
+   2b. If Needs a sign-in is no, open headless Chrome on that machine:
+   omnyo browser-automation open --backend local --headless --machine <host-id> --json
+   2c. If Needs a sign-in is yes, use the desktop app's Browser instead: run omnyo browser instances --host <desktop-host-id> --json, select the intended connected desktop instance, then:
+   omnyo browser-automation open --backend desktop --machine <desktop-host-id> --desktop <instance-id> --json
+   Ask if the intended desktop instance is ambiguous. Localhost means the browser's machine; use a reachable app URL if it differs from the dev server's machine. Keep the returned session ID. Emit the returned previewDirective once if present. Use omnyo browser-automation run to get a named page, navigate, and snapshot it; follow omnyo guide browser for the script format. Each run times out after 30 seconds by default.
+   Check: the page shows the intended app. For a signed-in flow, verify the expected account. If signed out, use omnyo browser import-sources with the selected host, instance, and generation to discover sources. Ask me which source/profile to use, then run omnyo browser import-cookies with those exact values. To keep logins current, ask whether I want login sync, and if so run omnyo browser cookie-sync enable with the same host, instance, generation, --from, and --profile values; it refreshes every 15 minutes. If the source browser needs quitting, an OS prompt needs my input, or login is still needed, stop with that specific next action. Never read or print cookie values. Import is desktop-only and doesn't populate headless sessions.
+
+3. Verify the change. Take a fresh snapshot, click through the requested flow using its element references, and check the visible result. Check the console and the layout at each size in Screen sizes. Use omnyo browser-automation screenshot <session-id> --page <name> --json and inspect the returned images. Show the screenshots that matter in this thread as images; for another browser host, fetch them with omnyo file read. Fix failures within the requested change and recheck the affected flow.
+   Check: the flow behaves as requested, the layout works at each size, and any console errors are explained. Report what you actually exercised and show the screenshots; don't call a screenshot alone a passing interaction test.
+
+4. Leave the app ready for feedback. Keep the preview server running.
+   4a. If a desktop instance is connected, close the automation session with omnyo browser-automation close <session-id>, then use omnyo browser create with the selected host, instance, generation, current thread, URL, and --reveal to leave a Browser tab open for annotations. Tell me to choose Annotate elements, click the element, write the change, and choose Add to prompt.
+   4b. If no desktop instance is connected, keep the headless session open instead of closing it and tell me to expand the preview, choose Annotate, select the element, write the change in What should change?, and choose Add note to chat. Close it with omnyo browser-automation close <session-id> once I'm done.
+   When I send an annotation, use its element context to make the change and verify it in a new browser session.
+   Check: the preview route still responds, and either the feedback Browser tab is open or the headless preview is live. Report the URL, terminal ID, browser machine, screenshots, and anything you couldn't verify.
+
+${skillOffer("check-in-browser", "my App URL, dev server command, sign-in, Screen sizes, and browser machine")}`,
+);
+
+export const guide: Guide = {
+  ...meta,
+  description:
+    "Have your coding agent check its own work and show you screenshots. Then you annotate what to change instead of describing it.",
+  heroTop: null,
+  concept: <BrowserConcept scene="code" />,
+  agentPrompt: AGENT_PROMPT,
+  requirement: "the Omnyo desktop app for Browser tabs and your logins",
+  steps: [
+    PLUGINS_STEP,
+    SIGN_INS_STEP,
+    {
+      id: "check",
+      title: "Ask your agent to try its change",
+      lead: "Give it a flow to exercise and the screen sizes you care about.",
+      body: (
+        <>
+          <PromptBlock
+            name="Example"
+            prompt="I just added status filters to the Orders page. Start the dev server, open the app in a browser, and try the filters at desktop and phone sizes. Fix anything broken, and show me screenshots."
+          />
+          <p>
+            Your agent starts the dev server, opens a browser, and clicks
+            through the flow. A live preview in the thread lets you watch.
+          </p>
+        </>
+      ),
+      shot: {
+        src: "/guides/agent-browser/window-check-full.webp",
+        alt: "The Check the order filters thread in Omnyo, with Claude Code still working and a live preview of the Acme Orders page at localhost:5173 filtered to Paid",
+        width: 2048,
+        height: 1280,
+      },
+      options: [
+        {
+          title: "See the screenshots",
+          body: (
+            <p>
+              Ask for them in the thread, like “show me the phone screenshots
+              before and after, side by side.” Here, the agent found the search
+              box and Total column cut off on a phone, fixed the CSS, and posted
+              both.
+            </p>
+          ),
+          shot: {
+            src: "/guides/agent-browser/window-screenshots-full.webp",
+            alt: "The agent's phone screenshots side by side in an Omnyo thread: before, the search box and Total column are cut off; after, both fit",
+            width: 2048,
+            height: 1280,
+          },
+        },
+      ],
+    },
+    annotateStep({
+      title: "Point at what to change",
+      lead: "Select the element instead of describing where it is.",
+      open: (
+        <>
+          Open the right panel <Ui icon="side-panel" /> (⌘⇧J), choose{" "}
+          <Ui icon="plus" />, then <strong>Open browser</strong>, and enter your
+          app's address. Or ask your agent to open it.
+        </>
+      ),
+      target: "the element",
+      note: "your note",
+      shot: {
+        src: "/guides/agent-browser/window-annotate.webp",
+        alt: "A Browser tab at localhost:5173/orders beside the Check the order filters thread, with the All filter selected for annotation and the note: Use our brand blue for the selected filter, like Export CSV",
+        width: 2048,
+        height: 1280,
+      },
+    }),
+  ],
+  troubleshooting: BROWSER_TROUBLESHOOTING,
+  faq: [
+    {
+      question: "Can it test my app at phone sizes?",
+      answer: (
+        <p>
+          Yes. Ask for the sizes you care about, like “desktop and iPhone.” The
+          agent resizes the browser and takes a screenshot at each size. You can
+          also expand the live preview and choose Phone, Tablet, or Desktop
+          yourself.
+        </p>
+      ),
+    },
+    {
+      question: "Does my dev server need to run on the same machine?",
+      answer: (
+        <p>
+          It's easiest. The agent starts the dev server in a terminal in the
+          thread, then opens it in a browser on the same machine.
+        </p>
+      ),
+    },
+    {
+      question: "Can I point at a Figma design?",
+      answer: (
+        <p>
+          Annotations select elements on a webpage, not layers in Figma.
+          Annotate the running app, and attach a screenshot of the design for
+          reference.
+        </p>
+      ),
+    },
+    {
+      question: "Can it do more than test my app?",
+      answer: (
+        <p>
+          Yes. The same browser handles research, signed-in dashboards, and
+          forms. See{" "}
+          <a href="/guides/agent-browser-for-work">
+            Get research and reports from any site
+          </a>
+          .
+        </p>
+      ),
+    },
+    ...BROWSER_FAQ,
+  ],
+  closer: {
+    title: "Let your agent check its own work",
+    body: "Free to use. Use the agents you already have.",
+  },
+};

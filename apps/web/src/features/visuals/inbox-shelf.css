@@ -1,0 +1,379 @@
+.fv.fv-inbox-shelf {
+  --is-loop: 8s;
+  --is-ready: 9.6em;
+
+  font-size: max(7px, 3cqw);
+  background: var(--fv-chrome);
+}
+
+.fv-inbox-shelf .fv-is-head {
+  position: absolute;
+  top: 0.9em;
+  left: 1.3em;
+  right: 1.3em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fv-inbox-shelf .fv-is-head b {
+  font-weight: 600;
+}
+
+.fv-inbox-shelf .fv-is-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  font-size: 0.78em;
+}
+
+.fv-inbox-shelf .fv-is-list {
+  position: absolute;
+  top: 3em;
+  left: 1.3em;
+  right: 1.3em;
+}
+
+.fv-inbox-shelf .fv-is-ready {
+  height: var(--is-ready);
+}
+
+.fv-inbox-shelf .fv-is-sec {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 1.9em;
+  font-size: 0.68em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fv-dim);
+}
+
+.fv-inbox-shelf .fv-is-sec span {
+  color: var(--fv-soft);
+}
+
+.fv-inbox-shelf .fv-is-sec svg {
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+
+.fv-inbox-shelf .fv-is-sec.is-shelf {
+  margin-top: 0.8em;
+}
+
+.fv-inbox-shelf .fv-is-row {
+  display: grid;
+  grid-template-columns: 1.5em 1fr auto;
+  align-items: center;
+  gap: 0.7em;
+  height: 2.3em;
+  margin-bottom: 0.35em;
+  padding: 0 0.8em;
+  border-radius: 0.6em;
+  background: var(--fv-raise);
+}
+
+.fv-inbox-shelf .fv-is-row b {
+  overflow: hidden;
+  font-size: 0.92em;
+  font-weight: 560;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-inbox-shelf .fv-is-row > span {
+  font-size: 0.8em;
+}
+
+.fv-inbox-shelf .fv-is-row svg {
+  width: 1.4em;
+  height: 1.4em;
+  fill: none;
+  stroke: var(--fv-ok);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-inbox-shelf .fv-is-row .fv-dot {
+  justify-self: center;
+}
+
+.fv-inbox-shelf .fv-is-archive {
+  padding: 0.1em 0.8em;
+  border: 1px solid color-mix(in oklch, var(--fv-ok) 45%, var(--fv-seam));
+  border-radius: 0.5em;
+  color: var(--fv-ok);
+}
+
+.fv-inbox-shelf .fv-is-bulk {
+  position: absolute;
+  top: 3em;
+  left: 1.3em;
+  right: 1.3em;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 0.8em 1em;
+  border-color: color-mix(in oklch, var(--fv-info) 40%, var(--fv-seam));
+  background: var(--fv-canvas);
+  opacity: 0;
+}
+
+.fv-inbox-shelf .fv-is-bulk-title {
+  font-weight: 600;
+}
+
+.fv-inbox-shelf .fv-is-bulk ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15em;
+  font-size: 0.82em;
+}
+
+.fv-inbox-shelf .fv-is-bulk li {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fv-inbox-shelf .fv-is-bulk li b {
+  font-weight: 560;
+}
+
+.fv-inbox-shelf .fv-is-bulk li span {
+  color: var(--fv-dim);
+}
+
+.fv-inbox-shelf .fv-is-actions {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  font-size: 0.82em;
+}
+
+.fv-inbox-shelf .fv-is-actions .is-main {
+  padding: 0.3em 1.1em;
+  border-radius: 0.55em;
+  background: var(--fv-ink);
+  color: var(--fv-canvas);
+  font-weight: 600;
+}
+
+.fv-inbox-shelf .fv-is-actions .fv-key {
+  font-size: 0.8em;
+}
+
+.fv-inbox-shelf .fv-is-toast {
+  position: absolute;
+  left: 1.3em;
+  right: 1.3em;
+  bottom: 0.9em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5em 0.9em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0.7em;
+  background: var(--fv-select);
+  font-size: 0.84em;
+  opacity: 0;
+}
+
+.fv-inbox-shelf .fv-is-toast b {
+  font-weight: 560;
+}
+
+.fv-inbox-shelf .fv-is-toast em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--fv-info);
+}
+
+.fv-inbox-shelf
+  :where(
+    .fv-is-bulk,
+    .fv-is-actions .is-main,
+    .fv-is-list,
+    .fv-is-ready > *,
+    .fv-is-rest,
+    .fv-is-toast
+  ) {
+  animation: var(--is-loop) var(--fv-swap) infinite both;
+}
+
+.fv-inbox-shelf .fv-is-bulk {
+  animation-name: fv-is-bulk;
+}
+
+.fv-inbox-shelf .fv-is-actions .is-main {
+  animation-name: fv-is-press;
+}
+
+.fv-inbox-shelf .fv-is-list {
+  animation-name: fv-is-list;
+}
+
+.fv-inbox-shelf .fv-is-ready > * {
+  animation-name: fv-is-out;
+}
+
+.fv-inbox-shelf .fv-is-ready > .is-r1 {
+  animation-delay: 0.08s;
+}
+
+.fv-inbox-shelf .fv-is-ready > .is-r2 {
+  animation-delay: 0.16s;
+}
+
+.fv-inbox-shelf .fv-is-ready > .is-r3 {
+  animation-delay: 0.24s;
+}
+
+.fv-inbox-shelf .fv-is-rest {
+  animation-name: fv-is-rest;
+}
+
+.fv-inbox-shelf .fv-is-toast {
+  animation-name: fv-is-toast;
+}
+
+@keyframes fv-is-bulk {
+  0%,
+  12% {
+    opacity: 0;
+    transform: translateY(-0.6em);
+  }
+
+  19%,
+  41% {
+    opacity: 1;
+    transform: none;
+  }
+
+  45%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes fv-is-press {
+  0%,
+  39% {
+    transform: none;
+  }
+
+  42% {
+    transform: scale(0.92);
+  }
+
+  45%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-is-list {
+  0%,
+  12% {
+    transform: none;
+  }
+
+  19%,
+  41% {
+    transform: translateY(7.6em);
+  }
+
+  48%,
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes fv-is-out {
+  0%,
+  45% {
+    opacity: 1;
+    transform: none;
+  }
+
+  52%,
+  93% {
+    opacity: 0;
+    transform: translateX(-30%);
+  }
+
+  94% {
+    opacity: 0;
+    transform: none;
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-is-rest {
+  0%,
+  52% {
+    opacity: 1;
+    transform: none;
+  }
+
+  60%,
+  89% {
+    opacity: 1;
+    transform: translateY(calc(-1 * var(--is-ready)));
+  }
+
+  93% {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--is-ready)));
+  }
+
+  94% {
+    opacity: 0;
+    transform: none;
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fv-is-toast {
+  0%,
+  50% {
+    opacity: 0;
+    transform: translateY(0.8em);
+  }
+
+  56%,
+  88% {
+    opacity: 1;
+    transform: none;
+  }
+
+  93%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-inbox-shelf *,
+  .fv-inbox-shelf *::before,
+  .fv-inbox-shelf *::after {
+    animation: none !important;
+  }
+}

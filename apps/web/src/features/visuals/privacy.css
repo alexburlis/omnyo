@@ -1,0 +1,154 @@
+.fv-privacy {
+  --pv-lift: color-mix(in oklab, var(--fv-ink) 16%, transparent);
+  --pv-glow: 4%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1em;
+  padding: 1.2em 1.8em;
+  background:
+    radial-gradient(
+      55% 45% at 50% 30%,
+      color-mix(in oklab, var(--fv-accent) var(--pv-glow), transparent),
+      transparent
+    ),
+    radial-gradient(circle, var(--fv-seam) 1px, transparent 1.2px) 0 0 / 1.6em
+      1.6em,
+    var(--fv-chrome);
+}
+
+.dark .fv-privacy {
+  --pv-lift: rgb(0 0 0 / 0.7);
+  --pv-glow: 9%;
+}
+
+.fv-privacy-flow {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+}
+
+.fv-privacy .fv-privacy-node {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45em;
+  padding: 0.9em 0.95em 1em;
+  border-radius: 1.1em;
+  background: var(--fv-canvas);
+  box-shadow: 0 1.4em 2.6em -1.2em var(--pv-lift);
+}
+
+.fv-privacy .fv-privacy-node--server {
+  border-color: color-mix(in oklab, var(--fv-accent) 85%, var(--fv-seam));
+  background: color-mix(in oklab, var(--fv-accent) 7%, var(--fv-canvas));
+  box-shadow:
+    0 0 0 0.3em color-mix(in oklab, var(--fv-accent) 18%, transparent),
+    0 1.4em 2.6em -1.2em var(--pv-lift);
+}
+
+.fv-privacy-icon {
+  width: 3em;
+  height: 2em;
+  margin-bottom: 0.2em;
+  fill: none;
+  stroke: var(--fv-soft);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fv-privacy-node--server .fv-privacy-icon {
+  stroke: var(--fv-ink);
+}
+
+.fv-privacy-icon .is-on {
+  fill: var(--fv-ok);
+  stroke: none;
+}
+
+.fv-privacy-title {
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.fv-privacy-sub {
+  font-size: 0.78em;
+  line-height: 1.35;
+  color: var(--fv-dim);
+}
+
+.fv-privacy-link {
+  position: relative;
+  flex: 0 1 3em;
+  min-width: 1.2em;
+}
+
+.fv-privacy-link::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0.35em;
+  right: 0.55em;
+  height: 0.18em;
+  margin-top: -0.09em;
+  border-radius: 1em;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--fv-ink) 0 0.45em,
+    transparent 0.45em 0.8em
+  );
+  animation: fv-privacy-flow 1.6s linear infinite;
+}
+
+.fv-privacy-link::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.25em;
+  margin-top: -0.38em;
+  border-top: 0.38em solid transparent;
+  border-bottom: 0.38em solid transparent;
+  border-left: 0.5em solid var(--fv-ink);
+}
+
+.fv-privacy-note {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 0.6em;
+  padding: 0.45em 1.1em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 99em;
+  background: var(--fv-canvas);
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.fv-privacy-note .fv-dot {
+  background: var(--fv-accent);
+}
+
+@keyframes fv-privacy-flow {
+  to {
+    background-position: 0.8em 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fv-privacy-link::before {
+    animation: none;
+  }
+}
+
+@container (max-width: 300px) {
+  .fv-privacy > .fv-eyebrow,
+  .fv-privacy-sub {
+    display: none;
+  }
+
+  .fv-privacy {
+    padding: 1em 1.2em;
+  }
+}

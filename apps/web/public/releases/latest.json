@@ -1,0 +1,18 @@
+{
+  "version": "0.1.17",
+  "notes": "Release 0.1.17",
+  "pub_date": "2026-01-25T06:05:57.822Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "url": "https://ahb.fsn1.your-objectstorage.com/Omnyo_0.1.17_arm64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSEZRNTlxakFvUDY3dTlOK2VYNDJCQmp6OFAwclNZejB4ZXVBR255TFVubVJVb0NiWCs3aGViNW1ZWVZvaENCMkcrRXk1MGtVeEhRMC81Yis1c0JwcmdvWXE2NlNEbFFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5MzIxMTU3CWZpbGU6T21ueW8uYXBwLnRhci5negpZSnNiRUtsQjZKY1RXRHQ4Rm5DQlBDOFFsY0pKd3Rza0t2RFFDb2Rrd0xIMWdDRFpqSE1HNWk4b1VMbGRuUHFQSzlrNFpadzhZRFNjMk5CV1I2bGNDZz09Cg=="
+    }
+  },
+  "downloads": {
+    "darwin-aarch64": {
+      "dmg": "https://ahb.fsn1.your-objectstorage.com/Omnyo_0.1.17_arm64.dmg",
+      "tar_gz": "https://ahb.fsn1.your-objectstorage.com/Omnyo_0.1.17_arm64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSEZRNTlxakFvUDY3dTlOK2VYNDJCQmp6OFAwclNZejB4ZXVBR255TFVubVJVb0NiWCs3aGViNW1ZWVZvaENCMkcrRXk1MGtVeEhRMC81Yis1c0JwcmdvWXE2NlNEbFFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5MzIxMTU3CWZpbGU6T21ueW8uYXBwLnRhci5negpZSnNiRUtsQjZKY1RXRHQ4Rm5DQlBDOFFsY0pKd3Rza0t2RFFDb2Rrd0xIMWdDRFpqSE1HNWk4b1VMbGRuUHFQSzlrNFpadzhZRFNjMk5CV1I2bGNDZz09Cg=="
+    }
+  }
+}

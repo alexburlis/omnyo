@@ -1,0 +1,342 @@
+.fv-dev-servers-restart {
+  --dr-loop: 8s;
+
+  display: flex;
+  flex-direction: column;
+  padding: 0 2.4em 1.4em;
+  background:
+    radial-gradient(60% 45% at 50% 100%, rgb(255 200 150 / 0.06), transparent),
+    var(--fv-canvas);
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-log {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 1em;
+  min-height: 0;
+  padding-bottom: 1em;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-you {
+  align-self: flex-end;
+  padding: 0.5em 1em;
+  border-radius: 1em;
+  background: var(--fv-select);
+  white-space: nowrap;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-step {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.55em 0.8em;
+  border-left: 2px solid var(--fv-seam);
+  font-size: 0.92em;
+  white-space: nowrap;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-step u {
+  text-decoration-color: var(--fv-hair);
+  text-underline-offset: 0.2em;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-step b {
+  margin-left: auto;
+  font-weight: 560;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-shelf {
+  padding: 0.5em 1em;
+  border: 1px solid var(--fv-seam);
+  border-bottom: 0;
+  border-radius: 1em 1em 0 0;
+  background: var(--fv-raise);
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-shelf li {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  height: 2.3em;
+  font-size: 0.95em;
+  white-space: nowrap;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-shelf li + li {
+  border-top: 1px solid var(--fv-seam);
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-shelf b {
+  font-weight: 560;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-dots {
+  display: grid;
+  width: 0.6em;
+  height: 0.6em;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-dots i {
+  grid-area: 1 / 1;
+  border-radius: 50%;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-dots .is-stopped {
+  background: var(--fv-dim);
+  opacity: 0;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-dots .is-starting {
+  background: var(--fv-attn);
+  opacity: 0;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-dots .is-online {
+  background: var(--fv-ok);
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-swap {
+  display: inline-grid;
+  color: var(--fv-dim);
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-swap > span {
+  grid-area: 1 / 1;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-swap > :not(.is-online) {
+  opacity: 0;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-swap.is-action,
+.fv-dev-servers-restart .fv-dev-servers-restart-open {
+  margin-left: auto;
+  color: var(--fv-ink);
+  font-size: 0.9em;
+  font-weight: 560;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-swap.is-action > span {
+  justify-self: end;
+  padding: 0.2em 0.75em;
+  border-radius: 0.45em;
+  background: var(--fv-select);
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-swap.is-action > .is-online {
+  background: var(--fv-ink);
+  color: var(--fv-canvas);
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-open {
+  padding: 0.2em 0.75em;
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-composer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 3.2em;
+  padding: 0 1em;
+  border: 1px solid var(--fv-hair);
+  border-radius: 0 0 1em 1em;
+  background: var(--fv-canvas);
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-composer i {
+  width: 1.8em;
+  height: 1.8em;
+  border-radius: 50%;
+  background: var(--fv-select);
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-cursor {
+  position: absolute;
+  top: 16.3em;
+  left: 34.3em;
+  width: 1.5em;
+  height: 1.5em;
+  fill: #fff;
+  stroke: #111;
+  stroke-width: 1.1;
+  stroke-linejoin: round;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fv-dev-servers-restart .fv-dev-servers-restart-dots .is-stopped,
+  .fv-dev-servers-restart .fv-dev-servers-restart-swap > .is-stopped {
+    animation: fv-dev-servers-restart-stopped var(--dr-loop) linear infinite;
+  }
+
+  .fv-dev-servers-restart .fv-dev-servers-restart-dots .is-starting,
+  .fv-dev-servers-restart .fv-dev-servers-restart-swap > .is-starting {
+    animation: fv-dev-servers-restart-starting var(--dr-loop) linear infinite;
+  }
+
+  .fv-dev-servers-restart .is-target .fv-dev-servers-restart-dots .is-online,
+  .fv-dev-servers-restart .fv-dev-servers-restart-swap > .is-online {
+    animation: fv-dev-servers-restart-online var(--dr-loop) linear infinite;
+  }
+
+  .fv-dev-servers-restart .fv-dev-servers-restart-swap.is-action > .is-stopped {
+    animation:
+      fv-dev-servers-restart-stopped var(--dr-loop) linear infinite,
+      fv-dev-servers-restart-press var(--dr-loop) linear infinite;
+  }
+
+  .fv-dev-servers-restart .fv-dev-servers-restart-step {
+    animation: fv-dev-servers-restart-step var(--dr-loop) var(--fv-swap)
+      infinite;
+  }
+
+  .fv-dev-servers-restart .fv-dev-servers-restart-agent,
+  .fv-dev-servers-restart .fv-dev-servers-restart-you {
+    animation: fv-dev-servers-restart-lift var(--dr-loop) var(--fv-swap)
+      infinite;
+  }
+
+  .fv-dev-servers-restart .fv-dev-servers-restart-cursor {
+    animation: fv-dev-servers-restart-cursor var(--dr-loop) var(--fv-swap)
+      infinite;
+  }
+}
+
+@keyframes fv-dev-servers-restart-stopped {
+  0%,
+  26% {
+    opacity: 1;
+  }
+
+  27.5%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-dev-servers-restart-starting {
+  0%,
+  27.5% {
+    opacity: 0;
+  }
+
+  29%,
+  51% {
+    opacity: 1;
+  }
+
+  52.5%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-dev-servers-restart-online {
+  0%,
+  52.5% {
+    opacity: 0;
+  }
+
+  54%,
+  96% {
+    opacity: 1;
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fv-dev-servers-restart-press {
+  0%,
+  24% {
+    transform: scale(1);
+  }
+
+  26% {
+    transform: scale(0.9);
+  }
+
+  28%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes fv-dev-servers-restart-step {
+  0%,
+  56% {
+    opacity: 0;
+    transform: translateY(0.6em);
+  }
+
+  62%,
+  94% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  98%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fv-dev-servers-restart-lift {
+  0%,
+  56% {
+    transform: translateY(3.4em);
+  }
+
+  62%,
+  94% {
+    transform: translateY(0);
+  }
+
+  100% {
+    transform: translateY(3.4em);
+  }
+}
+
+@keyframes fv-dev-servers-restart-cursor {
+  0%,
+  4% {
+    opacity: 0;
+    transform: translate(-7em, -5em);
+  }
+
+  8% {
+    opacity: 1;
+    transform: translate(-7em, -5em);
+  }
+
+  20%,
+  24% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  26% {
+    transform: translate(0, 0) scale(0.85);
+  }
+
+  28%,
+  36% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  44%,
+  100% {
+    opacity: 0;
+    transform: translate(1.5em, 2em);
+  }
+}
+
+.fv-dev-servers-restart .fv-dev-servers-restart-agent {
+  color: var(--fv-soft);
+}
