@@ -588,32 +588,38 @@
 }
 
 @media (min-width: 821px) {
-  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2:not(.is-reduced) .story {
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph] .story {
     height: 310vh;
   }
 
-  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2:not(.is-reduced)
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
     .kinetic-workspace {
     margin-top: -100svh;
   }
 
-  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2:not(.is-reduced)
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
     .kinetic-workspace-pin {
     --enter: 1;
   }
 
-  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2:not(.is-reduced)
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
     .kinetic-product {
-    opacity: var(--arrive, 1);
+    opacity: var(--arrive, 0);
   }
 
-  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2:not(.is-reduced)
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
     :is(.kinetic-copy, .kinetic-rail) {
-    opacity: clamp(0, calc((var(--arrive, 1) - 0.35) / 0.65), 1);
+    opacity: clamp(0, calc((var(--arrive, 0) - 0.35) / 0.65), 1);
   }
 
-  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2:not(.is-reduced)
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
+    .kinetic-workspace-pin[data-arriving]
+    :is(.kinetic-copy, .kinetic-rail) {
+    visibility: hidden;
+  }
+
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
     .kinetic-stars {
-    opacity: calc(var(--stage-mix) * 0.75 * var(--arrive, 1));
+    opacity: calc(var(--stage-mix) * 0.75 * var(--arrive, 0));
   }
 }

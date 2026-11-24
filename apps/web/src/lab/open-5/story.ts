@@ -39,6 +39,8 @@ const DESKTOP_PARTICLES = 12000;
 
 const STREAM_MARGIN = 64;
 
+const IDLE_MARGIN = 0.25;
+
 const TEXT_STEPS = 4;
 
 const SETTLE_MS = 800;
@@ -83,7 +85,8 @@ const MORPH_VH = {
   leave: [150, 14],
   morph: [156, 54],
   wipe: [156, 40],
-  arrive: 12,
+  arrive: 10,
+  reveal: 0.35,
 } as const;
 
 const progressVar = (element: HTMLElement) =>
@@ -213,7 +216,7 @@ export function startStory(
   const productPin = productFrame?.closest<HTMLElement>(".pin") ?? null;
   const productSurface = productFrame?.firstElementChild ?? null;
   const frameRect: Vec4 = [0, 0, 0, 0];
-  const frameShape = { width: -1, radius: 0 };
+  const frameShape = { width: -1, layoutWidth: -1, radius: 0 };
 
   const veil = root.querySelector<HTMLElement>("[data-veil]");
 
@@ -351,6 +354,12 @@ export function startStory(
     for (const element of toned) {
       if (element) delete element.dataset.tone;
     }
+
+    delete root.dataset.morph;
+
+    for (const element of Object.values(scenes)) {
+      if (element) delete element.dataset.idle;
+    }
   };
 
   if (reduced) {
@@ -441,6 +450,10 @@ export function startStory(
   } catch (error) {
     console.error("Particle field failed to start", error);
   }
+
+  const morphReady = productMorph && particles !== null && productPin !== null;
+
+  if (morphReady) root.dataset.morph = "";
 
   let layoutKey = "";
   let drawn = true;
@@ -542,11 +555,14 @@ export function startStory(
     return Boolean(track && track.top < 0 && track.bottom > pin.offsetHeight);
   };
 
-  const canvasPlace = () => {
+  const canvasPlace = (morphing: boolean) => {
     const page = root.getBoundingClientRect();
 
     return {
-      rides: page.bottom >= view.h && !pins.some(isPinned),
+      rides:
+        page.bottom >= view.h &&
+        !pins.some(isPinned) &&
+        !(morphing && productPin && isPinned(productPin)),
       x: -page.left,
       y: -page.top,
     };
@@ -564,7 +580,8 @@ export function startStory(
 
   const updateDom = (vw: number, vh: number) => {
     const phone = vw <= PHONE_MAX_WIDTH;
-    const place = canvasPlace();
+    const morphing = morphReady && !phone;
+    const place = canvasPlace(morphing);
     const hero = measure(scenes.hero, vh);
     const story = measure(scenes.story, vh);
     const app = measure(scenes.app, vh);
@@ -579,13 +596,13 @@ export function startStory(
     const ctaRect = rectOf(ctaMark);
     const streamRect = rectOf(stream);
     const titleRect = rectOf(storyTitle);
-    const morphing = Boolean(productPin) && !phone;
 
     const surfaceRect = morphing
       ? productSurface?.getBoundingClientRect()
       : undefined;
 
     const productPinRect = morphing ? rectOf(productPin) : undefined;
+    const productPinHeight = morphing ? (productPin?.offsetHeight ?? 0) : 0;
     const layerRect = winLayer?.getBoundingClientRect();
     const scrollable = document.documentElement.scrollHeight - vh;
 
@@ -611,7 +628,11 @@ export function startStory(
 
     const arrive =
       morphing && app.rect
-        ? ramp((-app.rect.top / vh) * 100, 0, MORPH_VH.arrive)
+        ? ramp(
+            (-app.rect.top / (productPinHeight || vh)) * 100,
+            0,
+            MORPH_VH.arrive,
+          )
         : 1;
 
     const s3 = morphing
@@ -623,13 +644,19 @@ export function startStory(
     const stage = s1 + s2 + s3 + s4 + s5;
 
     if (surfaceRect && productSurface instanceof HTMLElement) {
-      if (frameShape.width !== surfaceRect.width) {
+      const layoutWidth = productSurface.offsetWidth;
+
+      if (
+        frameShape.width !== surfaceRect.width ||
+        frameShape.layoutWidth !== layoutWidth
+      ) {
         frameShape.width = surfaceRect.width;
+        frameShape.layoutWidth = layoutWidth;
         frameShape.radius =
           (Number.parseFloat(
             getComputedStyle(productSurface).borderTopLeftRadius,
           ) || 0) *
-          (surfaceRect.width / Math.max(1, productSurface.offsetWidth));
+          (surfaceRect.width / Math.max(1, layoutWidth));
       }
 
       frameRect[0] = surfaceRect.left;
@@ -988,6 +1015,15 @@ export function startStory(
           progressVar(element),
           entry.rect.top > 0 ? entry.e - 1 : entry.p,
         );
+
+        flag(
+          element,
+          "idle",
+          entry.rect.top > vh * (1 + IDLE_MARGIN) ||
+            entry.rect.bottom < -vh * IDLE_MARGIN
+            ? ""
+            : null,
+        );
       }
 
       if (entry.rect.top < vh && entry.rect.bottom > 0) {
@@ -1104,7 +1140,14 @@ export function startStory(
       if (navLabel.textContent !== label) navLabel.textContent = label;
     }
 
-    if (productPin) setNumber(productPin, "--arrive", arrive);
+    if (productPin) {
+      setNumber(productPin, "--arrive", arrive);
+      flag(
+        productPin,
+        "arriving",
+        morphing && arrive < MORPH_VH.reveal ? "" : null,
+      );
+    }
 
     onProductProgress?.(app.rect && app.rect.top <= 0 ? app.p : 0);
     placeCanvas(place);

@@ -366,7 +366,10 @@ export function startBeatStepper({
         ? { stops: [], enterBelow: 0, enterAbove: 0, pinStart: 0, pinEnd: 0 }
         : {
             stops: stopsFor(top, travel, count),
-            enterBelow: top - vh * REACH_BEFORE,
+            enterBelow:
+              Number.parseFloat(getComputedStyle(section).marginTop) < 0
+                ? top
+                : top - vh * REACH_BEFORE,
             enterAbove: top + travel + vh * REACH_AFTER,
             pinStart: top,
             pinEnd: top + travel,

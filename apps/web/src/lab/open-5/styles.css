@@ -133,6 +133,16 @@ body:has(.lab-open-5) {
   );
 }
 
+.lab-open-5
+  [data-scene][data-idle]
+  :is(.hero-orbit, .win-cursor, .am-spin, .am-working, .am-dot),
+.lab-open-5
+  [data-scene][data-idle]
+  :is(.hero-scroll-line, .kinetic-clock-dot)::after,
+.lab-open-5 [data-scene][data-idle] .win-wait::before {
+  animation-play-state: paused !important;
+}
+
 .lab-open-5 .static-mark {
   display: none;
 }
