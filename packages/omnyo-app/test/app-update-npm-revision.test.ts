@@ -153,8 +153,6 @@ describe("pruneNpmRevisions", () => {
       sourceCommit: "b".repeat(40),
     };
 
-    writeFileSync(receiptPath, JSON.stringify(receipt));
-
     const marker = {
       schema: 1,
       owner: "omnyo-runtime-publication",
@@ -191,6 +189,10 @@ describe("pruneNpmRevisions", () => {
       keepPackageRoots: [formatNpmRevisionPackageRoot(dataDir, "1.2.0")],
     };
 
+    expect(await pruneNpmRevisions(args)).toEqual({
+      removed: [],
+      held: [{ entry: version, reason: "publisher receipt is unavailable" }],
+    });
     writeFileSync(
       receiptPath,
       JSON.stringify({ ...receipt, status: "ambiguous" }),

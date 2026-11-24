@@ -9,7 +9,8 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, normalize, sep } from "node:path";
 import {
   compareReleaseVersions,
   parseReleaseVersion,
@@ -86,6 +87,31 @@ const publicationSchema = z
     activated: z.boolean(),
   })
   .strict();
+
+async function resolvePublisherReceipt(path: string): Promise<string> {
+  const supportDirectory = join(homedir(), "Library", "Application Support");
+  const legacyStore = join(supportDirectory, "bb-private-releases");
+  const legacyPrefix = legacyStore + sep;
+  const normalized = normalize(path);
+
+  if (process.platform !== "darwin" || !normalized.startsWith(legacyPrefix))
+    return path;
+
+  try {
+    await lstat(legacyStore);
+
+    return path;
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))
+      throw error;
+  }
+
+  return join(
+    supportDirectory,
+    "omnyo-private-releases",
+    normalized.slice(legacyPrefix.length),
+  );
+}
 
 export async function markNpmRevisionActivated(
   dataDir: string,
@@ -326,7 +352,24 @@ export async function pruneNpmRevisions(args: {
       continue;
     }
 
-    const receiptRaw = await readFile(publication.receiptPath, "utf8");
+    const receiptPath = await resolvePublisherReceipt(publication.receiptPath);
+
+    const receiptRaw = await readFile(receiptPath, "utf8").catch(
+      (error: unknown) => {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "ENOENT"
+        )
+          return null;
+        throw error;
+      },
+    );
+
+    if (receiptRaw === null) {
+      hold("publisher receipt is unavailable");
+      continue;
+    }
 
     const receipt = z
       .object({
@@ -390,7 +433,7 @@ export async function pruneNpmRevisions(args: {
         state: await readAppUpdateState(args.dataDir),
         offer: await readPrivateServerUpdateManifest(args.dataDir),
       }) !== bindings ||
-      (await readFile(publication.receiptPath, "utf8")) !== receiptRaw
+      (await readFile(receiptPath, "utf8")) !== receiptRaw
     )
       throw new Error("Runtime retention ownership changed during inspection.");
 
