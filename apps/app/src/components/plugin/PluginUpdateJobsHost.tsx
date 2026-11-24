@@ -6,11 +6,14 @@ import {
   invalidatePluginCatalogSearch,
 } from "@/hooks/cache-owners/plugin-cache-owner";
 import {
+  hasReportedPluginUpdate,
   isWatchedPluginUpdate,
+  markPluginUpdateReported,
   trackPluginUpdate,
 } from "@/lib/plugin-update-tracking";
 import { appToast } from "@/components/ui/app-toast";
 import { usePluginNotificationAction } from "./PluginNotificationDescription";
+import { displayPluginVersion } from "./management/plugin-ui";
 
 export function PluginUpdateJobsHost() {
   const action = usePluginNotificationAction();
@@ -38,7 +41,13 @@ export function PluginUpdateJobsHost() {
         continue;
       }
 
-      if (previous === undefined && !isWatchedPluginUpdate(job.id)) continue;
+      const updated = job.state === "completed" && job.result.applied;
+
+      if (updated && hasReportedPluginUpdate(job.id)) continue;
+
+      if (!updated && previous === undefined && !isWatchedPluginUpdate(job.id))
+        continue;
+
       trackPluginUpdate(job.id, false);
       void invalidatePluginList({ queryClient });
       invalidatePluginCatalogSearch({ queryClient });
@@ -56,15 +65,19 @@ export function PluginUpdateJobsHost() {
           action: action(job.pluginId, "installed"),
         });
       } else {
-        appToast.success(
-          job.result.applied ? "Plugin updated" : "Plugin is up to date",
-          {
-            id,
-            badge: true,
-            description: job.displayName,
-            action: action(job.pluginId, "app"),
-          },
-        );
+        const version = job.result.to?.version;
+
+        appToast.success(updated ? "Plugin updated" : "Plugin is up to date", {
+          id,
+          badge: true,
+          description:
+            updated && version !== undefined
+              ? `${job.displayName} — ${displayPluginVersion(version)}`
+              : job.displayName,
+          action: action(job.pluginId, "app"),
+        });
+
+        if (updated) markPluginUpdateReported(job.id);
       }
     }
   }, [jobs, queryClient, action]);

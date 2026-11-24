@@ -1,8 +1,10 @@
-const KEY = "omnyo.watched-plugin-updates";
+const WATCHED_KEY = "omnyo.watched-plugin-updates";
 
-function watched(): string[] {
+const REPORTED_KEY = "omnyo.reported-plugin-updates";
+
+function readIds(key: string): string[] {
   try {
-    const value: unknown = JSON.parse(sessionStorage.getItem(KEY) ?? "[]");
+    const value: unknown = JSON.parse(sessionStorage.getItem(key) ?? "[]");
 
     return Array.isArray(value)
       ? value.filter((id): id is string => typeof id === "string")
@@ -12,16 +14,28 @@ function watched(): string[] {
   }
 }
 
+function setTrackedId(key: string, id: string, tracked: boolean): void {
+  const ids = readIds(key).filter((candidate) => candidate !== id);
+
+  if (tracked) ids.push(id);
+
+  try {
+    sessionStorage.setItem(key, JSON.stringify(ids.slice(-100)));
+  } catch {}
+}
+
 export function isWatchedPluginUpdate(id: string): boolean {
-  return watched().includes(id);
+  return readIds(WATCHED_KEY).includes(id);
 }
 
 export function trackPluginUpdate(id: string, active: boolean): void {
-  const ids = watched().filter((candidate) => candidate !== id);
+  setTrackedId(WATCHED_KEY, id, active);
+}
 
-  if (active) ids.push(id);
+export function hasReportedPluginUpdate(id: string): boolean {
+  return readIds(REPORTED_KEY).includes(id);
+}
 
-  try {
-    sessionStorage.setItem(KEY, JSON.stringify(ids.slice(-100)));
-  } catch {}
+export function markPluginUpdateReported(id: string): void {
+  setTrackedId(REPORTED_KEY, id, true);
 }

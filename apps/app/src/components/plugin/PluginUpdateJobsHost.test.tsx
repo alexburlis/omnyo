@@ -7,12 +7,17 @@ import type { PluginUpdateJob } from "@omnyo/server-contract";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { pluginUpdateJobsQueryKey } from "@/hooks/queries/query-keys";
 import { appToast } from "@/components/ui/app-toast";
+import {
+  getNotifications,
+  resetNotificationStore,
+} from "@/lib/notifications/notification-store";
 import { PluginUpdateJobsHost } from "./PluginUpdateJobsHost";
 
 const base = { id: "update-1", pluginId: "notes", displayName: "Notes" };
 
 afterEach(() => {
   cleanup();
+  resetNotificationStore();
   sessionStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -39,6 +44,36 @@ function mount(jobs: PluginUpdateJob[]) {
 
   return { ...view, ...harness };
 }
+
+it("records an update first seen after completion once in the bell panel", () => {
+  const completed: PluginUpdateJob = {
+    ...base,
+    state: "completed",
+    result: {
+      applied: true,
+      from: { version: "1.0.0", display: "1.0.0" },
+      to: { version: "1.1.0", display: "1.1.0" },
+      outcome: "updated",
+    },
+  };
+
+  const first = mount([completed]);
+  expect(getNotifications()).toEqual([
+    expect.objectContaining({
+      title: "Plugin updated",
+      description: "Notes — 1.1.0",
+      badge: true,
+    }),
+  ]);
+  first.unmount();
+  first.queryClient.clear();
+  resetNotificationStore();
+
+  const second = mount([completed]);
+  expect(getNotifications()).toEqual([]);
+  second.unmount();
+  second.queryClient.clear();
+});
 
 it.each(["updated", "rolled-back"] as const)(
   "recovers a watched update after reload and reports %s once",
