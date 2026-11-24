@@ -271,6 +271,20 @@ export const BUNDLED_PLUGINS: readonly BundledPluginDefinition[] = [
   ...OFFICIAL_PLUGINS,
 ];
 
+const DISABLED_BY_DEFAULT_PLUGIN_IDS: ReadonlySet<string> = new Set([
+  "chat-topics",
+  "chief",
+]);
+
+export function isBundledPluginEnabledByDefault(
+  plugin: Pick<BundledPluginDefinition, "pluginId" | "defaultEnabled">,
+): boolean {
+  return (
+    plugin.defaultEnabled &&
+    !DISABLED_BY_DEFAULT_PLUGIN_IDS.has(plugin.pluginId)
+  );
+}
+
 export function isRemovableBundledPlugin(
   plugin: Pick<BundledPluginDefinition, "autoInstall">,
 ): boolean {

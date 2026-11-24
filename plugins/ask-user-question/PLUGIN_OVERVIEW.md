@@ -14,3 +14,7 @@ The tool returns immediately. Questions stay open until answered, skipped or wit
 Questions from a child chat, or from a chat another chat started, go to that parent or launching chat instead of the owner, and its answer arrives as a message in the asking chat.
 
 The tool is added to providers that do not rely on their own blocking question tool, including Claude Code, whose own tool Omnyo redirects here outside plan mode. Providers that rely on their own tool keep their native behavior.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [ask-user-question plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/ask-user-question). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

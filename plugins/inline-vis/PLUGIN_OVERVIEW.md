@@ -37,3 +37,7 @@ HTML runs in a sandboxed iframe with an opaque origin. Scripts in the page canno
 ## For agents
 
 The bundled `inline-vis` skill teaches the agent when to use a fenced block and when to use the directive, how to lay a page out so it reads as part of the reply, and which theme variables to style with. No account or external service is required.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [inline-vis plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/inline-vis). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

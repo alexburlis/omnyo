@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Run a waiting chat on a free machine in a temporary copy of its project",
   "author": {
-    "name": "alexburlis",
+    "name": "Omnyo",
     "url": "https://github.com/alexburlis"
   },
   "engines": {

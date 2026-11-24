@@ -18,3 +18,7 @@ Disabling the plugin removes its introduction and all three skills. The
 settings affect this plugin's copies, not independently installed user or
 provider skills. Other plugins keep their own skills. The generated
 `plugin-commands` skill continues to describe enabled plugin commands.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [bb-guide plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/bb-guide). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

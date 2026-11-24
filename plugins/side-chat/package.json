@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Reply to messages in hidden side-chat forks rendered in a thread panel.",
   "author": {
-    "name": "bb",
-    "url": "https://github.com/get-bb"
+    "name": "Omnyo",
+    "url": "https://omnyohq.com"
   },
   "repository": {
     "type": "git",

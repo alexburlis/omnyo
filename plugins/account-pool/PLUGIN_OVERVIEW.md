@@ -37,3 +37,7 @@ Use `omnyo pool --help` and nested `--help` for account, routing, config, parent
 
 Provider Retry uses pool recovery times. Inspect `omnyo provider-retry status` or `omnyo provider-retry explain <thread-id>`.
 For exact account, routing and reset procedures, read [accounts and routing](skills/account-pool/references/accounts-and-routing.md). For prediction boundaries, read [composer predictions](skills/account-pool/references/composer-predictions.md).
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [account-pool plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/account-pool). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

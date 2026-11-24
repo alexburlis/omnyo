@@ -20,3 +20,7 @@ Agents share managed previews in chat using the original loopback URL. Omnyo ope
 ## Requirements
 
 A omnyo.link account and the Omnyo account plugin. Share links open only for viewers with your omnyo.link session; they are not public. Mobile pairing is available under Mobile → Add mobile device.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [connect plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/connect). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

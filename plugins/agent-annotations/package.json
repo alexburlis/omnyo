@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Annotate elements in a Browser tab and add them to the prompt as structured agent context.",
   "author": {
-    "name": "bb",
-    "url": "https://github.com/get-bb"
+    "name": "Omnyo",
+    "url": "https://omnyohq.com"
   },
   "repository": {
     "type": "git",

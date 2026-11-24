@@ -19,3 +19,7 @@ The **When** choice is remembered across composers and page reloads in this brow
 Omnyo submits the draft through the normal send path, so the scheduled message is the same message you would send with Enter. In the new-thread screen, the thread starts at the chosen time with the provider and environment you selected. The entry is disabled when the draft is empty or a send is in progress.
 
 The plugin adds no agent tools or CLI commands.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [scheduled-send plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/scheduled-send). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

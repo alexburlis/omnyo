@@ -22,3 +22,7 @@ If a search fails or takes more than 5 seconds, click **Retry** to repeat it wit
 Inserting into an empty composer restores the whole prompt, including mentions and attachments. Otherwise the prompt's text and mentions go where the cursor was. Starred prompts keep text and mentions; attachments are dropped.
 
 Previous prompts come from Omnyo's prompt history: messages you sent yourself, not ones sent by agents.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [prompt-library plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/prompt-library). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

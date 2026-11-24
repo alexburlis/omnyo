@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Let any provider ask the user a multiple-choice question, the way Claude Code's AskUserQuestion does natively.",
   "author": {
-    "name": "bb",
-    "url": "https://github.com/get-bb"
+    "name": "Omnyo",
+    "url": "https://omnyohq.com"
   },
   "repository": {
     "type": "git",

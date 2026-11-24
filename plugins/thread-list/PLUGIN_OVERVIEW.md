@@ -36,3 +36,7 @@ does. The chronological and machine modes show grouped chats as ordinary
 chats, and dragging a chat into or out of a folder is not supported yet.
 
 Disable the plugin to hide the list; another thread-list plugin can take its place under Settings → Appearance.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [thread-list plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/thread-list). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

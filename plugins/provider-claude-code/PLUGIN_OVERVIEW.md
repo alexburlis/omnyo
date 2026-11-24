@@ -21,3 +21,7 @@ Start a thread, pick Claude Code, and let it work in your repository from Omnyo.
 - Install the Claude Code CLI (`claude`) on the host machine. The plugin can run the installer for you.
 - Sign in with `claude` on that machine. Omnyo reads the sign-in state to show account and plan.
 - `Claude in Chrome` needs the Chrome extension and a claude.ai login on the host.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [provider-claude-code plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/provider-claude-code). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

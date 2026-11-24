@@ -19,7 +19,10 @@ import {
   parseBundledMarketplaceManifestJson,
 } from "../../../src/services/plugin-catalog/marketplace-manifest.js";
 import { loadBundledMarketplace } from "../../../src/services/plugin-catalog/bundled-marketplace.js";
-import { BUNDLED_PLUGINS } from "../../../src/services/plugins/builtin-registry.js";
+import {
+  BUNDLED_PLUGINS,
+  isBundledPluginEnabledByDefault,
+} from "../../../src/services/plugins/builtin-registry.js";
 
 const run = promisify(execFile);
 
@@ -32,13 +35,39 @@ const OMNYO_MADE_CORE_PLUGINS = new Set([
   "wait-sources",
 ]);
 
-function originalAuthor(plugin: (typeof BUNDLED_PLUGINS)[number]) {
+const OMNYO_FORKS = new Set([
+  "account-pool",
+  "agent-annotations",
+  "ask-user-question",
+  "automations",
+  "browser-automation",
+  "concurrency-limit",
+  "connect",
+  "environment-project-checkout",
+  "inline-vis",
+  "keep-awake",
+  "omnyo-account",
+  "omnyo-guide",
+  "prompt-library",
+  "provider-claude-code",
+  "provider-codex",
+  "push-notifications",
+  "scheduled-send",
+  "side-chat",
+  "thread-list",
+]);
+
+function expectedAuthor(plugin: (typeof BUNDLED_PLUGINS)[number]) {
   if (OMNYO_MADE_CORE_PLUGINS.has(plugin.name)) {
     return {
-      name: "alexburlis",
+      name: "Omnyo",
       github: "alexburlis",
       url: "https://github.com/alexburlis",
     };
+  }
+
+  if (OMNYO_FORKS.has(plugin.name)) {
+    return { name: "Omnyo", url: "https://omnyohq.com" };
   }
 
   return { name: "bb", github: "get-bb", url: "https://github.com/get-bb" };
@@ -138,7 +167,7 @@ describe("Omnyo Official marketplace generator", () => {
               onByDefault:
                 plugin !== undefined &&
                 plugin.autoInstall &&
-                plugin.defaultEnabled,
+                isBundledPluginEnabledByDefault(plugin),
               ...(entry.publishedAt === undefined
                 ? {}
                 : { publishedAt: entry.publishedAt }),
@@ -157,7 +186,13 @@ describe("Omnyo Official marketplace generator", () => {
 
       expect(entry?.id).toBe(plugin.pluginId);
       expect(entry?.screenshots).toEqual(fields[plugin.name]?.screenshots);
-      expect(entry?.author).toEqual(originalAuthor(plugin));
+      expect(entry?.author).toEqual(expectedAuthor(plugin));
+
+      if (OMNYO_FORKS.has(plugin.name)) {
+        expect(entry?.overview).toContain("Michael Yong");
+        expect(entry?.overview).toContain("MIT");
+        expect(entry?.overview).toContain("https://github.com/get-bb/bb/");
+      }
     }
   });
 

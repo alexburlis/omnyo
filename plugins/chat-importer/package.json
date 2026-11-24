@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Import recent Codex CLI and Claude Code chats so you can continue them in Omnyo.",
   "author": {
-    "name": "alexburlis",
+    "name": "Omnyo",
     "url": "https://github.com/alexburlis"
   },
   "private": true,

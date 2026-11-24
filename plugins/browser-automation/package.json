@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Let Omnyo control the in-app browser and browsers on connected machines, with inline previews for headless sessions.",
   "author": {
-    "name": "bb",
-    "url": "https://github.com/get-bb"
+    "name": "Omnyo",
+    "url": "https://omnyohq.com"
   },
   "repository": {
     "type": "git",

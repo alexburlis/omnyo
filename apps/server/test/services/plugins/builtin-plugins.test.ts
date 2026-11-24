@@ -847,6 +847,45 @@ describe("builtin plugin reconciliation", () => {
     ]);
   });
 
+  it("includes Chief and Chat Topics disabled when their companion bundles are present", async () => {
+    const names = ["chief", "chat-topics"];
+
+    const { sourceModuleDir } = await writePackagedBuiltinSource(
+      workDir,
+      names,
+    );
+
+    const dataDir = join(workDir, "data");
+
+    const bundledPlugins = names.map((name) => ({
+      name,
+      pluginId: name,
+      autoInstall: true,
+      defaultEnabled: true,
+      rootDir: join(sourceModuleDir, "builtin-plugins", name),
+    }));
+
+    service = await createService({ db, dataDir, bundledPlugins });
+    await service.start();
+
+    for (const id of names) {
+      expect(service.list().find((plugin) => plugin.id === id)).toMatchObject({
+        enabled: false,
+        status: "disabled",
+      });
+    }
+
+    await service.setEnabled("chat-topics", true);
+    await service.stop();
+    service = await createService({ db, dataDir, bundledPlugins });
+    await service.start();
+
+    expect(getInstalledPluginRegistration(db, "chat-topics")).toMatchObject({
+      enabled: true,
+      enabledFollowsDefault: false,
+    });
+  });
+
   it.each([false, true])(
     "follows a changed default for a builtin the user never toggled (initial default: %s)",
     async (initialDefault) => {

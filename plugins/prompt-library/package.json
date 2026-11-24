@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Search previous prompts, star favorites, and insert them into the composer.",
   "author": {
-    "name": "bb",
-    "url": "https://github.com/get-bb"
+    "name": "Omnyo",
+    "url": "https://omnyohq.com"
   },
   "repository": {
     "type": "git",

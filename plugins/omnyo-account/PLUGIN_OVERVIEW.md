@@ -15,3 +15,7 @@ Click Sign in, or run `omnyo account login`. Open the omnyo.link link, sign in w
 ## Requirements
 
 A GitHub account to sign in to omnyo.link. An imported server keeps Omnyo account off until you run `omnyo server allow-connect`.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [bb-account plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/bb-account). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

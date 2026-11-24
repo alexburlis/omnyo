@@ -2122,8 +2122,10 @@ raising `OMNYO_LOG_LEVEL`.
 
 ## Plugins
 
-Plugins are on by default. Builtin plugins ship with Omnyo and install on fresh
-installations. Core builtins, including connect, can be disabled but not
+Builtin plugins ship with Omnyo and install on fresh installations. Chief and
+Chat Topics start disabled when the distribution includes them. Both are
+available in Omnyo Official, and an explicit enable or disable choice persists
+across updates. Core builtins, including connect, can be disabled but not
 removed. The included plugins from Omnyo's plugin collection
 (`origin: "omnyo-plugins"` in `apps/server/src/services/plugins/builtin-registry.ts`)
 can be removed in Settings or with `omnyo plugin remove <id>`, which deletes

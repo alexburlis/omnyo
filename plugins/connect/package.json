@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Remote access via the Omnyo relay at omnyo.link \u2014 this Omnyo becomes reachable at https://<handle>.omnyo.link. Disable to cut off all remote access.",
   "author": {
-    "name": "bb",
-    "url": "https://github.com/get-bb"
+    "name": "Omnyo",
+    "url": "https://omnyohq.com"
   },
   "repository": {
     "type": "git",

@@ -27,6 +27,7 @@ import {
   BUILTIN_PLUGIN_ID_PREFIX,
   BUNDLED_PLUGINS,
   builtinPluginSource,
+  isBundledPluginEnabledByDefault,
   type BundledPluginRegistration,
 } from "./builtin-registry.js";
 import { BUNDLED_MARKETPLACE_NAME } from "../plugin-catalog/marketplace-manifest.js";
@@ -851,6 +852,7 @@ export function createPluginRegistration(context: PluginRegistrationContext) {
 
     for (const bundled of bundledPlugins) {
       const source = builtinPluginSource(bundled.name);
+      const defaultEnabled = isBundledPluginEnabledByDefault(bundled);
       let manifest: PluginManifest;
 
       try {
@@ -900,11 +902,11 @@ export function createPluginRegistration(context: PluginRegistrationContext) {
         if (
           existing.removedAt === null &&
           existing.enabledFollowsDefault &&
-          existing.enabled !== bundled.defaultEnabled
+          existing.enabled !== defaultEnabled
         ) {
           deps.db
             .update(installedPlugins)
-            .set({ enabled: bundled.defaultEnabled, updatedAt: Date.now() })
+            .set({ enabled: defaultEnabled, updatedAt: Date.now() })
             .where(eq(installedPlugins.id, existing.id))
             .run();
         }
@@ -925,9 +927,7 @@ export function createPluginRegistration(context: PluginRegistrationContext) {
       const enabledFollowsDefault =
         existing === undefined || existing.enabledFollowsDefault;
 
-      const enabled = enabledFollowsDefault
-        ? bundled.defaultEnabled
-        : existing.enabled;
+      const enabled = enabledFollowsDefault ? defaultEnabled : existing.enabled;
 
       const sameBundledSource =
         existing?.sourceKind === "builtin" &&

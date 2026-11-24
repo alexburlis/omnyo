@@ -23,3 +23,7 @@ Start a thread, pick Codex, and let it write and review code in your repository 
 - Install the Codex CLI (`codex`) on the host machine, version 0.136.0 or newer. The plugin can run the npm install for you.
 - Sign in with `codex login` on that machine. A ChatGPT account or an OpenAI API key both work.
 - Usage limits show only for ChatGPT accounts.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [provider-codex plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/provider-codex). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

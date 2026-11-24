@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Run a thread in the project's own checkout on an enrolled machine, on the branch you choose",
   "author": {
-    "name": "bb",
-    "url": "https://github.com/get-bb"
+    "name": "Omnyo",
+    "url": "https://omnyohq.com"
   },
   "repository": {
     "type": "git",

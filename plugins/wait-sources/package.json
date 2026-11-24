@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Wake waiting chats when a URL answers, a file appears or a command succeeds.",
   "author": {
-    "name": "alexburlis",
+    "name": "Omnyo",
     "url": "https://github.com/alexburlis"
   },
   "engines": {

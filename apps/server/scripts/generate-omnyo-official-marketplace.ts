@@ -20,6 +20,7 @@ import {
 } from "../src/services/plugin-catalog/bundled-marketplace-paths.js";
 import {
   BUNDLED_PLUGINS,
+  isBundledPluginEnabledByDefault,
   type BundledPluginDefinition,
 } from "../src/services/plugins/builtin-registry.js";
 import type { MarketplaceEntry } from "../src/services/plugin-catalog/marketplace-manifest.js";
@@ -370,7 +371,10 @@ export async function generateOmnyoOfficialMarketplace(args: {
 
   const onByDefaultIds = new Set(
     args.plugins
-      .filter((plugin) => plugin.autoInstall && plugin.defaultEnabled)
+      .filter(
+        (plugin) =>
+          plugin.autoInstall && isBundledPluginEnabledByDefault(plugin),
+      )
       .map((plugin) => plugin.pluginId),
   );
 

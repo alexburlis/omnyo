@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Shows a thread's branch, changes, commits, and pull request in one control in the thread header.",
   "author": {
-    "name": "alexburlis",
+    "name": "Omnyo",
     "url": "https://github.com/alexburlis"
   },
   "engines": {

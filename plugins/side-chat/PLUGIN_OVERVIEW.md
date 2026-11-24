@@ -14,3 +14,7 @@ The fork copies the conversation up to the chosen message and reuses the same wo
 Once per hour, the plugin looks for side chats older than 24 hours. A side chat with no user message and no queued message is archived. A side chat you used is kept.
 
 The plugin adds no agent tools or CLI commands.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [side-chat plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/side-chat). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

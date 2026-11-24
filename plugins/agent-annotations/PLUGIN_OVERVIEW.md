@@ -13,3 +13,7 @@ Point at what you mean instead of describing where it is. In a Browser tab in th
 3. Choose **Annotate elements**, click the element, write your note, and choose **Add to prompt**. Then send the message.
 
 Annotations work in the desktop app's Browser tabs. They aren't available in the web app or in a thread's live preview.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [agent-annotations plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/agent-annotations). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

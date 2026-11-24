@@ -13,3 +13,7 @@ Schedule work once or on a repeat, and let Omnyo run it while you do something e
 Agents get the `automations` skill and the `omnyo automation` command: `create`, `list`, `show`, `update`, `pause`, `resume`, `run`, `runs`, and `delete`. All commands accept `--json`. Threads that an automation starts cannot create automations.
 
 Scripts run on the machine that hosts the Omnyo server. New standard-project scripts use that host's project source when available; Personal and projects without one run in the plugin's shared script storage. Existing scripts run there until changed. A script can instead select an absolute server-host path, and its detail view shows the resolved directory. Agent runs use the providers you already have installed.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [automations plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/automations). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

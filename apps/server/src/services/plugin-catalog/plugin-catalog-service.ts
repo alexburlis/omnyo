@@ -4,8 +4,12 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   PLUGIN_CATALOG_CATEGORIES as BUILTIN_DISCOVERY_CATEGORIES,
+  derivePluginId,
+  pluginPackageJsonSchema,
   type PluginMarketplaceCategory,
 } from "@omnyo/domain";
+import { readPluginPackageJsonFile } from "@omnyo/plugin-build";
+import { z } from "zod";
 import {
   deletePluginMarketplace,
   getPluginMarketplace,
@@ -463,7 +467,9 @@ export function createPluginCatalogService(deps: {
     const installed =
       args.installedEntryIds.has(catalogEntryKey(row.name, entryId)) ||
       (installedPlugin !== undefined &&
-        installedPluginMayComeFromEntry(installedPlugin, entry));
+        (installedPluginMayComeFromEntry(installedPlugin, entry) ||
+          (bundled !== undefined &&
+            (await localPluginMatchesBundled(installedPlugin, bundled)))));
 
     return {
       entryId,
@@ -1377,6 +1383,87 @@ function installedPluginMayComeFromEntry(
 
       return false;
   }
+}
+
+async function localPluginMatchesBundled(
+  plugin: InstalledPluginRow,
+  bundled: BundledPluginRegistration,
+): Promise<boolean> {
+  if (
+    plugin.provenance !== "direct" ||
+    plugin.sourceKind !== "path" ||
+    plugin.id !== bundled.pluginId
+  ) {
+    return false;
+  }
+
+  try {
+    const [installedPackage, includedPackage] = await Promise.all([
+      readPluginPackageJsonFile(join(plugin.rootDir, "package.json")),
+      readPluginPackageJsonFile(join(bundled.rootDir, "package.json")),
+    ]);
+
+    const installed = pluginPackageJsonSchema.parse(installedPackage);
+    const included = pluginPackageJsonSchema.parse(includedPackage);
+
+    if (
+      derivePluginId(installed.name) !== plugin.id ||
+      derivePluginId(included.name) !== bundled.pluginId
+    ) {
+      return false;
+    }
+
+    const includedRepository = localRepositoryIdentity(included.repository);
+
+    return (
+      includedRepository !== null &&
+      localRepositoryIdentity(installed.repository) === includedRepository
+    );
+  } catch {
+    return false;
+  }
+}
+
+const localRepositorySchema = z.object({
+  url: z.string(),
+  directory: z.string().optional(),
+});
+
+function localRepositoryIdentity(repository: unknown): string | null {
+  const parsed = localRepositorySchema.safeParse(repository);
+
+  if (!parsed.success) return null;
+  const directory = parsed.data.directory?.split("/") ?? [];
+
+  if (
+    directory.some(
+      (segment) =>
+        !/^[A-Za-z0-9._-]+$/u.test(segment) ||
+        segment === "." ||
+        segment === "..",
+    )
+  ) {
+    return null;
+  }
+
+  const match =
+    /^(?:git\+)?https:\/\/github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/u.exec(
+      parsed.data.url,
+    );
+
+  const owner = match?.[1];
+  const name = match?.[2];
+
+  if (
+    owner === undefined ||
+    name === undefined ||
+    name === "." ||
+    name === ".."
+  ) {
+    return null;
+  }
+
+  return `${owner.toLowerCase()}/${name.toLowerCase()}/${parsed.data.directory ?? ""}`;
 }
 
 function gitRepositoryKey(url: string): string {

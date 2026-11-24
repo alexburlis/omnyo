@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Run omnyo threads with Claude Code.",
   "author": {
-    "name": "bb",
-    "url": "https://github.com/get-bb"
+    "name": "Omnyo",
+    "url": "https://omnyohq.com"
   },
   "repository": {
     "type": "git",

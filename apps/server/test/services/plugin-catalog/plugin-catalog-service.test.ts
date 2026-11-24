@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -14,7 +14,10 @@ import {
   type DbConnection,
   type PluginSourceIntent,
 } from "@omnyo/db";
-import { PLUGIN_CATALOG_CATEGORIES } from "@omnyo/domain";
+import {
+  PLUGIN_CATALOG_CATEGORIES,
+  pluginPackageJsonSchema,
+} from "@omnyo/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPluginCatalogService } from "../../../src/services/plugin-catalog/plugin-catalog-service.js";
 import {
@@ -858,6 +861,143 @@ describe("plugin catalog service", () => {
   });
 
   describe("catalog installs", () => {
+    it.each([
+      { name: "the same repository and directory", installed: true },
+      {
+        name: "the same repository root",
+        bundledAtRepositoryRoot: true,
+        repository: { url: "git+https://github.com/get-bb/bb.git" },
+        installed: true,
+      },
+      {
+        name: "the root of the same repository instead of a subdirectory",
+        repository: { url: "https://github.com/get-bb/bb" },
+        installed: false,
+      },
+      {
+        name: "another repository",
+        repository: {
+          url: "https://github.com/another/plugins",
+          directory: "plugins/docs",
+        },
+        installed: false,
+      },
+      {
+        name: "another directory",
+        repository: {
+          url: "https://github.com/get-bb/bb",
+          directory: "plugins/another",
+        },
+        installed: false,
+      },
+      {
+        name: "a URL with credentials",
+        repository: {
+          url: "https://user@github.com/get-bb/bb",
+          directory: "plugins/docs",
+        },
+        installed: false,
+      },
+      {
+        name: "a directory with traversal",
+        repository: {
+          url: "https://github.com/get-bb/bb",
+          directory: "plugins/other/../docs",
+        },
+        installed: false,
+      },
+      {
+        name: "another manifest ID",
+        packageName: "omnyo-plugin-another",
+        installed: false,
+      },
+      { name: "a missing repository", repository: null, installed: false },
+    ])(
+      "recognizes a direct local bundled plugin from $name: $installed",
+      async ({
+        repository,
+        packageName,
+        installed,
+        bundledAtRepositoryRoot,
+      }) => {
+        const bundled = listBundledPluginRegistrations().find(
+          (plugin) => plugin.name === "docs",
+        );
+
+        if (bundled === undefined)
+          throw new Error("expected docs registration");
+
+        const packageJson = pluginPackageJsonSchema.parse(
+          JSON.parse(
+            await readFile(join(bundled.rootDir, "package.json"), "utf8"),
+          ),
+        );
+
+        const rootDir = join(dataDir, "local-snapshot");
+
+        const bundledRoot = bundledAtRepositoryRoot
+          ? join(dataDir, "bundled-root")
+          : bundled.rootDir;
+
+        if (bundledAtRepositoryRoot) {
+          await mkdir(bundledRoot);
+          await writeFile(join(bundledRoot, "server.js"), "export default {};");
+          await writeFile(
+            join(bundledRoot, "package.json"),
+            JSON.stringify({
+              ...packageJson,
+              repository: { url: "https://github.com/get-bb/bb" },
+              omnyo: {
+                name: packageJson.omnyo.name,
+                description: packageJson.omnyo.description,
+                branding: { icon: "Zap" },
+                server: "./server.js",
+              },
+            }),
+          );
+        }
+
+        await mkdir(rootDir);
+        await writeFile(
+          join(rootDir, "package.json"),
+          JSON.stringify({
+            ...packageJson,
+            ...(repository === undefined ? {} : { repository }),
+            ...(packageName === undefined ? {} : { name: packageName }),
+          }),
+        );
+        const sourcePath = join(dataDir, "source-checkout");
+        const source = `path:${sourcePath}`;
+        upsertInstalledPlugin(db, {
+          id: bundled.pluginId,
+          source,
+          provenance: { kind: "direct" },
+          sourceIntent: { kind: "path", canonicalPath: sourcePath },
+          exactResolution: { kind: "path" },
+          updateState: {
+            lastCheckAt: null,
+            availableCompatibleVersion: null,
+            newestIncompatibleVersion: null,
+            statusDetail: null,
+          },
+          activeArtifactId: null,
+          rootDir,
+          version: "0.1.0",
+          enabled: true,
+          enabledFollowsDefault: false,
+        });
+
+        const catalog = service({
+          bundledPlugins: [{ ...bundled, rootDir: bundledRoot }],
+        });
+
+        expect((await catalog.search("simple-notes"))[0]).toMatchObject({
+          installed,
+          conflictingInstallSource: installed ? null : source,
+        });
+      },
+    );
+
     async function refreshedCatalog(entry: Record<string, unknown>) {
       const catalog = service({
         fetch: async (url) =>

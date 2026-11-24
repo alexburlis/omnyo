@@ -28,3 +28,7 @@ Use the `omnyo concurrency-limit` command:
 - `omnyo concurrency-limit needs <project-id> <needs>|same-os` sets what a project's chats need, from `macos`, `windows`, `linux`, `arm64`, `x64`, `xcode`, `nvidia-gpu` or `tag:<name>`.
 
 Add `--json` for machine-readable output. Limits go from 0 to 10000. A limit of 0 holds every new turn in that scope. To move one waiting chat by hand, use `omnyo thread start-on <thread-id> --machine <machine>`.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [concurrency-limit plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/concurrency-limit). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.

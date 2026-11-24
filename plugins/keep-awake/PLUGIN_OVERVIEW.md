@@ -21,3 +21,7 @@ Add `--json` to any command for machine-readable output.
 ## Requirements
 
 macOS and Windows hosts are supported. On macOS the plugin runs `caffeinate`; on Windows it holds a system-required execution state from a PowerShell process. Neither keeps the display on. On a Linux host, the plugin does nothing and writes a warning to the log.
+
+## Credits
+
+Maintained and extended by Omnyo, based on the [keep-awake plugin in bb](https://github.com/get-bb/bb/tree/main/plugins/keep-awake). Thank you to Michael Yong and the bb contributors for the original work. The upstream code is [MIT licensed](https://github.com/get-bb/bb/blob/main/LICENSE), copyright (c) 2026 Michael Yong.
